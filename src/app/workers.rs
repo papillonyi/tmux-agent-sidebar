@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use crate::git::{self, GitData};
 use crate::session;
-use crate::state::{AppState, BottomTab};
+use crate::state::{AppState, BottomPanel};
 use crate::tmux;
 use crate::version::{self, UpdateNotice};
 
@@ -26,7 +26,9 @@ pub(super) fn spawn(state: &AppState) -> Workers {
     let (session_tx, session_rx) = mpsc::channel::<HashMap<String, String>>();
     let (version_tx, version_rx) = mpsc::channel::<UpdateNotice>();
     let tmux_pane_clone = state.tmux_pane.clone();
-    let git_tab_active = Arc::new(AtomicBool::new(state.bottom_tab == BottomTab::GitStatus));
+    let git_tab_active = Arc::new(AtomicBool::new(
+        state.active_bottom_panel == BottomPanel::Git,
+    ));
     let git_tab_flag = Arc::clone(&git_tab_active);
     std::thread::spawn(move || {
         git_poll_loop(&tmux_pane_clone, &git_tx, &git_tab_flag);

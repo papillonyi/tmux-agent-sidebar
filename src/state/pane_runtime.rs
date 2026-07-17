@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::AppState;
 use crate::activity::TaskProgress;
-use crate::state::BottomTab;
+use crate::state::BottomPanel;
 
 /// Per-pane runtime state that should vanish together with the pane.
 #[derive(Debug, Clone, Default)]
@@ -16,7 +16,7 @@ pub struct PaneRuntimeState {
     /// `None` until the user changes tabs at least once. Cleaned up
     /// automatically by `prune_pane_states_to_current_panes` when the
     /// pane disappears, so a relaunched pane starts fresh.
-    pub tab_pref: Option<BottomTab>,
+    pub bottom_panel_pref: Option<BottomPanel>,
     /// Last observed mtime of this pane's `/tmp/tmux-agent-activity*.log`.
     /// Used by `refresh_task_progress` to skip the (potentially expensive)
     /// re-parse when the log has not been touched since the previous tick.
@@ -160,7 +160,7 @@ mod tests {
         assert!(state.task_progress.is_none());
         assert!(state.task_dismissed_total.is_none());
         assert!(state.inactive_since.is_none());
-        assert!(state.tab_pref.is_none());
+        assert!(state.bottom_panel_pref.is_none());
         assert!(state.task_progress_log_mtime.is_none());
     }
 

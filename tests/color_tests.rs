@@ -4,7 +4,7 @@ mod test_helpers;
 use ratatui::style::Color;
 use test_helpers::*;
 use tmux_agent_sidebar::activity::{ActivityEntry, TaskProgress, TaskStatus};
-use tmux_agent_sidebar::state::{BottomTab, Focus};
+use tmux_agent_sidebar::state::{BottomPanel, Focus};
 use tmux_agent_sidebar::tmux::{AgentType, PaneStatus, PermissionMode, SessionInfo, WindowInfo};
 use tmux_agent_sidebar::ui::colors::ColorTheme;
 
@@ -302,8 +302,8 @@ fn test_git_summary_modified_uses_badge_auto_color() {
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
 
-    state.bottom_tab = BottomTab::GitStatus;
-    state.focus_state.focus = Focus::ActivityLog;
+    state.active_bottom_panel = BottomPanel::Git;
+    state.focus_state.focus = Focus::BottomPanel;
     state.focus_state.sidebar_focused = true;
     state.git.branch = "main".into();
     state.git.unstaged_files = vec![tmux_agent_sidebar::git::GitFileEntry {
@@ -548,8 +548,8 @@ fn test_pr_link_uses_pr_link_color() {
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
 
-    state.bottom_tab = BottomTab::GitStatus;
-    state.focus_state.focus = Focus::ActivityLog;
+    state.active_bottom_panel = BottomPanel::Git;
+    state.focus_state.focus = Focus::BottomPanel;
     state.focus_state.sidebar_focused = true;
     state.git.branch = "feature/test".into();
     state.git.pr_number = Some("99".into());
@@ -617,8 +617,8 @@ fn test_diff_stat_added_uses_diff_added_color() {
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
 
-    state.bottom_tab = BottomTab::GitStatus;
-    state.focus_state.focus = Focus::ActivityLog;
+    state.active_bottom_panel = BottomPanel::Git;
+    state.focus_state.focus = Focus::BottomPanel;
     state.focus_state.sidebar_focused = true;
     state.git.branch = "main".into();
     state.git.diff_stat = Some((42, 10));
@@ -685,8 +685,8 @@ fn test_diff_stat_deleted_uses_diff_deleted_color() {
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
 
-    state.bottom_tab = BottomTab::GitStatus;
-    state.focus_state.focus = Focus::ActivityLog;
+    state.active_bottom_panel = BottomPanel::Git;
+    state.focus_state.focus = Focus::BottomPanel;
     state.focus_state.sidebar_focused = true;
     state.git.branch = "main".into();
     state.git.diff_stat = Some((0, 25));
@@ -738,8 +738,8 @@ fn test_file_change_stat_uses_file_change_color() {
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
 
-    state.bottom_tab = BottomTab::GitStatus;
-    state.focus_state.focus = Focus::ActivityLog;
+    state.active_bottom_panel = BottomPanel::Git;
+    state.focus_state.focus = Focus::BottomPanel;
     state.focus_state.sidebar_focused = true;
     state.git.branch = "main".into();
     state.git.unstaged_files = vec![tmux_agent_sidebar::git::GitFileEntry {

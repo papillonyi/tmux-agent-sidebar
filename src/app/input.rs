@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use crate::state::{AppState, BottomTab, Focus};
+use crate::state::{AppState, BottomPanel, Focus};
 use crate::worktree::RemoveMode;
 
 /// Dispatch a single crossterm [`Event`] into the [`AppState`], returning
@@ -28,14 +28,21 @@ pub(super) fn handle_event(
                     let bottom_start = term_height.saturating_sub(bottom_h);
                     if mouse.row < bottom_start {
                         state.handle_mouse_click(mouse.row, mouse.column);
-                    } else if mouse.row == bottom_start {
-                        state.handle_bottom_tab_click(mouse.column);
+                    } else {
+                        state.handle_bottom_panel_title_click(
+                            mouse.row,
+                            mouse.column,
+                            term_height,
+                            bottom_h,
+                        );
                         // Keep the background git poller in sync immediately — the
                         // keyboard `BackTab` path does the same update. Without this,
-                        // clicking into Git Status leaves polling disabled until the
-                        // next refresh tick and the tab renders stale data.
-                        git_tab_active
-                            .store(state.bottom_tab == BottomTab::GitStatus, Ordering::Relaxed);
+                        // selecting Git leaves polling disabled until the next refresh
+                        // tick and the panel renders stale data.
+                        git_tab_active.store(
+                            state.active_bottom_panel == BottomPanel::Git,
+                            Ordering::Relaxed,
+                        );
                     }
                 }
                 MouseEventKind::ScrollDown => {
@@ -108,7 +115,7 @@ pub(super) fn handle_key_event(
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code {
         KeyCode::Esc => {
-            if state.focus_state.focus == Focus::ActivityLog
+            if state.focus_state.focus == Focus::BottomPanel
                 || state.focus_state.focus == Focus::Filter
             {
                 state.focus_state.focus = Focus::Panes;
@@ -158,8 +165,11 @@ pub(super) fn handle_key_event(
             state.rebuild_row_targets();
         }
         KeyCode::BackTab => {
-            state.next_bottom_tab();
-            git_tab_active.store(state.bottom_tab == BottomTab::GitStatus, Ordering::Relaxed);
+            state.next_bottom_panel();
+            git_tab_active.store(
+                state.active_bottom_panel == BottomPanel::Git,
+                Ordering::Relaxed,
+            );
         }
         _ => {}
     }
@@ -175,10 +185,10 @@ fn pane_nav_down(state: &mut AppState) {
             if state.move_pane_selection(1) {
                 state.global.queue_cursor_save();
             } else {
-                state.focus_state.focus = Focus::ActivityLog;
+                state.focus_state.focus = Focus::BottomPanel;
             }
         }
-        Focus::ActivityLog => state.scroll_bottom(1),
+        Focus::BottomPanel => state.scroll_bottom(1),
     }
 }
 
@@ -192,10 +202,10 @@ fn pane_nav_up(state: &mut AppState) {
                 state.focus_state.focus = Focus::Filter;
             }
         }
-        Focus::ActivityLog => {
-            let at_top = match state.bottom_tab {
-                BottomTab::Activity => state.activity.scroll.offset == 0,
-                BottomTab::GitStatus => state.scrolls.git.offset == 0,
+        Focus::BottomPanel => {
+            let at_top = match state.active_bottom_panel {
+                BottomPanel::Activity => state.activity.scroll.offset == 0,
+                BottomPanel::Git => state.scrolls.git.offset == 0,
             };
             if at_top {
                 state.focus_state.focus = Focus::Panes;
@@ -327,6 +337,20 @@ mod tests {
         let flag = AtomicBool::new(false);
         handle_key_event(key(KeyCode::Char('p')), &mut state, &flag);
         assert_eq!(state.global.selected_pane_row, 1);
+    }
+
+    #[test]
+    fn shift_tab_switches_the_active_bottom_panel() {
+        let mut state = AppState::new("%99".into());
+        let flag = AtomicBool::new(false);
+
+        handle_key_event(key(KeyCode::BackTab), &mut state, &flag);
+        assert_eq!(state.active_bottom_panel, BottomPanel::Git);
+        assert!(flag.load(Ordering::Relaxed));
+
+        handle_key_event(key(KeyCode::BackTab), &mut state, &flag);
+        assert_eq!(state.active_bottom_panel, BottomPanel::Activity);
+        assert!(!flag.load(Ordering::Relaxed));
     }
 
     #[test]

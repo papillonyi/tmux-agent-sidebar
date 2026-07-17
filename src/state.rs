@@ -34,9 +34,9 @@ pub use session::SessionNamesState;
 pub use timers::RefreshTimers;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum BottomTab {
+pub enum BottomPanel {
     Activity,
-    GitStatus,
+    Git,
 }
 
 pub struct AppState {
@@ -56,12 +56,12 @@ pub struct AppState {
     pub layout: FrameLayout,
     pub activity: ActivityState,
     pub tmux_pane: String,
-    /// Scroll offsets for the agents list and git tab. Activity tab
+    /// Scroll offsets for the agents list and Git panel. Activity panel
     /// scroll lives in [`ActivityState::scroll`].
     pub scrolls: ScrollStates,
     pub theme: ColorTheme,
     pub icons: StatusIcons,
-    pub bottom_tab: BottomTab,
+    pub active_bottom_panel: BottomPanel,
     pub git: crate::git::GitData,
     pub pane_states: PaneRuntimeMap,
     /// Periodic-refresh clocks (port scan, session-name scan, filter
@@ -150,7 +150,7 @@ impl AppState {
             scrolls: ScrollStates::default(),
             theme: ColorTheme::default(),
             icons: StatusIcons::default(),
-            bottom_tab: BottomTab::Activity,
+            active_bottom_panel: BottomPanel::Activity,
             git: crate::git::GitData::default(),
             pane_states: PaneRuntimeMap::new(),
             timers: RefreshTimers::default(),
@@ -948,24 +948,24 @@ mod tests {
         // directly, so we don't assert it here (tmux not available in tests).
     }
 
-    // ─── auto_switch_tab tests are in state/tab.rs ────────────────
+    // ─── auto_select_bottom_panel tests are in state/tab.rs ────────────────
 
-    // ─── next_bottom_tab / scroll_bottom tests ──────────────────────
+    // ─── next_bottom_panel / scroll_bottom tests ──────────────────────
 
     #[test]
-    fn next_bottom_tab_toggles() {
+    fn next_bottom_panel_toggles() {
         let mut state = AppState::new("%99".into());
-        assert_eq!(state.bottom_tab, BottomTab::Activity);
-        state.next_bottom_tab();
-        assert_eq!(state.bottom_tab, BottomTab::GitStatus);
-        state.next_bottom_tab();
-        assert_eq!(state.bottom_tab, BottomTab::Activity);
+        assert_eq!(state.active_bottom_panel, BottomPanel::Activity);
+        state.next_bottom_panel();
+        assert_eq!(state.active_bottom_panel, BottomPanel::Git);
+        state.next_bottom_panel();
+        assert_eq!(state.active_bottom_panel, BottomPanel::Activity);
     }
 
     #[test]
     fn scroll_bottom_dispatches_to_activity() {
         let mut state = AppState::new("%99".into());
-        state.bottom_tab = BottomTab::Activity;
+        state.active_bottom_panel = BottomPanel::Activity;
         state.activity.scroll = ScrollState {
             offset: 0,
             total_lines: 10,
@@ -980,7 +980,7 @@ mod tests {
     #[test]
     fn scroll_bottom_dispatches_to_git() {
         let mut state = AppState::new("%99".into());
-        state.bottom_tab = BottomTab::GitStatus;
+        state.active_bottom_panel = BottomPanel::Git;
         state.scrolls.git = ScrollState {
             offset: 0,
             total_lines: 10,
@@ -997,7 +997,7 @@ mod tests {
     #[test]
     fn mouse_scroll_in_bottom_panel_scrolls_activity() {
         let mut state = AppState::new("%99".into());
-        state.bottom_tab = BottomTab::Activity;
+        state.active_bottom_panel = BottomPanel::Activity;
         state.activity.scroll = ScrollState {
             offset: 0,
             total_lines: 30,
@@ -1040,7 +1040,7 @@ mod tests {
     #[test]
     fn mouse_scroll_at_boundary_row_goes_to_bottom() {
         let mut state = AppState::new("%99".into());
-        state.bottom_tab = BottomTab::GitStatus;
+        state.active_bottom_panel = BottomPanel::Git;
         state.scrolls.git = ScrollState {
             offset: 0,
             total_lines: 20,

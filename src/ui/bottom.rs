@@ -9,7 +9,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
-use crate::state::{AppState, BottomTab, Focus};
+use crate::state::{AppState, BottomPanel, Focus};
 
 use super::text::display_width;
 
@@ -50,7 +50,7 @@ fn draw_card_frame(
         return None;
     }
 
-    let border_color = if selected && state.focus_state.focus == Focus::ActivityLog {
+    let border_color = if selected && state.focus_state.focus == Focus::BottomPanel {
         state.theme.accent
     } else {
         state.theme.border_inactive
@@ -105,7 +105,7 @@ pub fn draw_bottom(frame: &mut Frame, state: &mut AppState, area: Rect) {
         state,
         git_area,
         "Git",
-        state.bottom_tab == BottomTab::GitStatus,
+        state.active_bottom_panel == BottomPanel::Git,
     ) {
         git::draw_git_content(frame, state, inner);
     }
@@ -114,7 +114,7 @@ pub fn draw_bottom(frame: &mut Frame, state: &mut AppState, area: Rect) {
         state,
         activity_area,
         "Activity",
-        state.bottom_tab == BottomTab::Activity,
+        state.active_bottom_panel == BottomPanel::Activity,
     ) {
         activity::draw_activity_content(frame, state, inner);
     }

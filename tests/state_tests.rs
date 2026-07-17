@@ -5,7 +5,7 @@ use test_helpers::*;
 use tmux_agent_sidebar::activity::ActivityEntry;
 use tmux_agent_sidebar::group::{PaneGitInfo, RepoGroup};
 use tmux_agent_sidebar::state::{
-    AppState, BottomTab, Focus, GlobalState, PopupState, RepoFilter, RowTarget, StatusFilter,
+    AppState, BottomPanel, Focus, GlobalState, PopupState, RepoFilter, RowTarget, StatusFilter,
 };
 use tmux_agent_sidebar::tmux::{
     self, AgentType, PaneInfo, PaneStatus, SessionInfo, WindowInfo, WorktreeMetadata,
@@ -287,7 +287,7 @@ fn test_rebuild_row_targets_clamps_selection() {
 fn test_scroll_git_empty_is_noop() {
     let mut state = make_state(vec![]);
     state.scrolls.git.offset = 0;
-    state.bottom_tab = BottomTab::GitStatus;
+    state.active_bottom_panel = BottomPanel::Git;
     state.scroll_bottom(5);
     assert_eq!(
         state.scrolls.git.offset, 0,
@@ -381,7 +381,7 @@ fn test_state_new_defaults() {
     assert_eq!(state.scrolls.panes.offset, 0);
     assert_eq!(state.scrolls.panes.total_lines, 0);
     assert_eq!(state.scrolls.panes.visible_height, 0);
-    assert_eq!(state.bottom_tab, BottomTab::Activity);
+    assert_eq!(state.active_bottom_panel, BottomPanel::Activity);
     assert!(state.git.branch.is_empty());
     assert_eq!(state.scrolls.git.offset, 0);
     assert!(state.git.pr_number.is_none());
@@ -428,7 +428,7 @@ fn test_move_pane_selection_return_value() {
 #[test]
 fn test_scroll_bottom_dispatches_to_git() {
     let mut state = make_state(vec![]);
-    state.bottom_tab = BottomTab::GitStatus;
+    state.active_bottom_panel = BottomPanel::Git;
     state.git.unstaged_files = vec![tmux_agent_sidebar::git::GitFileEntry {
         status: 'M',
         name: "file.rs".into(),
@@ -447,7 +447,7 @@ fn test_scroll_bottom_dispatches_to_git() {
 #[test]
 fn test_scroll_bottom_dispatches_to_activity() {
     let mut state = make_state(vec![]);
-    state.bottom_tab = BottomTab::Activity;
+    state.active_bottom_panel = BottomPanel::Activity;
     state.activity.entries = vec![ActivityEntry {
         timestamp: "10:00".into(),
         tool: "Read".into(),
@@ -461,16 +461,16 @@ fn test_scroll_bottom_dispatches_to_activity() {
     assert_eq!(state.activity.scroll.offset, 2);
 }
 
-// ─── State: next_bottom_tab cycle Tests ─────────────────────────────
+// ─── State: next_bottom_panel cycle Tests ─────────────────────────────
 
 #[test]
-fn test_next_bottom_tab_full_cycle() {
+fn test_next_bottom_panel_full_cycle() {
     let mut state = make_state(vec![]);
-    assert_eq!(state.bottom_tab, BottomTab::Activity);
-    state.next_bottom_tab();
-    assert_eq!(state.bottom_tab, BottomTab::GitStatus);
-    state.next_bottom_tab();
-    assert_eq!(state.bottom_tab, BottomTab::Activity);
+    assert_eq!(state.active_bottom_panel, BottomPanel::Activity);
+    state.next_bottom_panel();
+    assert_eq!(state.active_bottom_panel, BottomPanel::Git);
+    state.next_bottom_panel();
+    assert_eq!(state.active_bottom_panel, BottomPanel::Activity);
 }
 
 // ─── State: scroll_activity empty Tests ─────────────────────────────
@@ -491,13 +491,13 @@ fn test_scroll_activity_empty_is_noop() {
 #[test]
 fn test_git_tab_active_after_tab_switch() {
     let mut state = make_state(vec![]);
-    assert_eq!(state.bottom_tab, BottomTab::Activity);
+    assert_eq!(state.active_bottom_panel, BottomPanel::Activity);
 
-    state.next_bottom_tab();
-    assert_eq!(state.bottom_tab, BottomTab::GitStatus);
+    state.next_bottom_panel();
+    assert_eq!(state.active_bottom_panel, BottomPanel::Git);
 
-    state.next_bottom_tab();
-    assert_eq!(state.bottom_tab, BottomTab::Activity);
+    state.next_bottom_panel();
+    assert_eq!(state.active_bottom_panel, BottomPanel::Activity);
 }
 
 // ─── State: global sync → rebuild consistency Tests ─────────────

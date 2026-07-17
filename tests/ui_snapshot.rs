@@ -1435,7 +1435,7 @@ fn snapshot_activity_all_tool_types_ui() {
 fn snapshot_focus_activity_log_ui() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Running);
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
-    state.focus_state.focus = Focus::ActivityLog;
+    state.focus_state.focus = Focus::BottomPanel;
     state.focus_state.sidebar_focused = true;
     state.activity.entries = vec![ActivityEntry {
         timestamp: "10:00".into(),

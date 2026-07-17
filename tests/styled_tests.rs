@@ -3,7 +3,7 @@ mod test_helpers;
 
 use test_helpers::*;
 use tmux_agent_sidebar::activity::ActivityEntry;
-use tmux_agent_sidebar::state::{BottomTab, Focus};
+use tmux_agent_sidebar::state::{BottomPanel, Focus};
 use tmux_agent_sidebar::tmux::{AgentType, PaneStatus, SessionInfo, WindowInfo};
 
 // ─── Styled Snapshot Tests for Selection and Focus ─────────────────
@@ -53,7 +53,7 @@ fn snapshot_activity_focused_styled() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.focus_state.focus = Focus::ActivityLog;
+    state.focus_state.focus = Focus::BottomPanel;
     state.focus_state.sidebar_focused = true;
     state.activity.entries = vec![ActivityEntry {
         timestamp: "10:32".into(),
@@ -125,7 +125,7 @@ fn snapshot_activity_unfocused_styled() {
 }
 
 #[test]
-fn bottom_tab_activity_uses_accent_when_selected() {
+fn active_bottom_panel_activity_uses_accent_when_selected() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Running);
     let mut state = make_state(vec![SessionInfo {
         session_name: "main".into(),
@@ -139,9 +139,9 @@ fn bottom_tab_activity_uses_accent_when_selected() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.focus_state.focus = Focus::ActivityLog;
+    state.focus_state.focus = Focus::BottomPanel;
     state.focus_state.sidebar_focused = true;
-    state.bottom_tab = BottomTab::Activity;
+    state.active_bottom_panel = BottomPanel::Activity;
 
     // Styled snapshot locks in `A` using accent (fg:153) and `G` remaining
     // muted (fg:252) on the bottom-panel tab title row.
@@ -164,7 +164,7 @@ fn bottom_tab_activity_uses_accent_when_selected() {
 }
 
 #[test]
-fn bottom_tab_git_uses_accent_when_selected() {
+fn active_bottom_panel_git_uses_accent_when_selected() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Running);
     let mut state = make_state(vec![SessionInfo {
         session_name: "main".into(),
@@ -178,9 +178,9 @@ fn bottom_tab_git_uses_accent_when_selected() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.focus_state.focus = Focus::ActivityLog;
+    state.focus_state.focus = Focus::BottomPanel;
     state.focus_state.sidebar_focused = true;
-    state.bottom_tab = BottomTab::GitStatus;
+    state.active_bottom_panel = BottomPanel::Git;
 
     // Styled snapshot locks in `G` using accent (fg:153) and `A` remaining
     // muted (fg:252) on the bottom-panel tab title row.

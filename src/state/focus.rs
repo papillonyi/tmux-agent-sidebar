@@ -6,7 +6,7 @@ pub enum Focus {
     Filter,
     #[default]
     Panes,
-    ActivityLog,
+    BottomPanel,
 }
 
 #[derive(Debug, Clone)]
