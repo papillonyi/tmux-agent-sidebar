@@ -7,17 +7,18 @@ use super::{HookRegistration, json_str, json_value_or_null, optional_str};
 pub struct CodexAdapter;
 
 impl CodexAdapter {
-    /// Single source of truth for Codex CLI hook wiring. Verified against
-    /// Codex CLI's official hook event enum in
-    /// `openai/codex:codex-rs/hooks/src/engine/config.rs`, which currently
-    /// defines only: `PreToolUse`, `PostToolUse`, `SessionStart`,
-    /// `UserPromptSubmit`, `Stop`.
+    /// Single source of truth for the Codex CLI hooks wired by this project.
+    /// Codex currently documents these lifecycle events: `SessionStart`,
+    /// `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PreCompact`,
+    /// `PostCompact`, `UserPromptSubmit`, `SubagentStart`, `SubagentStop`, and
+    /// `Stop`. This adapter currently wires only the four registrations below.
     ///
     /// Caveats:
-    /// - `PostToolUse` fires only for Bash (Codex's `PostToolUseToolInput`
-    ///   is a typed `{ command: String }` struct); the resulting activity
-    ///   log is Bash-only.
-    /// - `PreToolUse` is supported by Codex but not yet wired.
+    /// - `PostToolUse` currently covers supported Bash, `apply_patch`, and MCP
+    ///   tool calls. The adapter accepts any non-empty `tool_name` and records
+    ///   the resulting activity.
+    /// - `PreToolUse`, `PermissionRequest`, compaction, and subagent hooks are
+    ///   supported by Codex but not yet wired here.
     pub const HOOK_REGISTRATIONS: &'static [HookRegistration] = &[
         HookRegistration {
             trigger: "SessionStart",
@@ -73,9 +74,10 @@ impl EventAdapter for CodexAdapter {
                 agent_id: None,
                 session_id: optional_str(input, "session_id"),
             }),
-            // Codex's PostToolUse currently fires only for Bash (tool_input is
-            // typed `{ command: String }`). Other tools do not emit the hook,
-            // so the resulting activity log is Bash-only.
+            // Codex currently emits PostToolUse for supported Bash,
+            // `apply_patch`, and MCP tool calls. Preserve the canonical tool
+            // name and raw input/output so downstream labeling can handle each
+            // supported tool without agent-specific parsing here.
             "activity-log" => {
                 let tool_name = json_str(input, "tool_name");
                 if tool_name.is_empty() {
