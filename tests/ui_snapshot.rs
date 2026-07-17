@@ -6,7 +6,8 @@ use tmux_agent_sidebar::activity::{ActivityEntry, TaskProgress, TaskStatus};
 use tmux_agent_sidebar::group::{PaneGitInfo, RepoGroup};
 use tmux_agent_sidebar::state::{Focus, PopupState, RepoFilter, StatusFilter};
 use tmux_agent_sidebar::tmux::{
-    AgentType, PaneInfo, PaneStatus, PermissionMode, SessionInfo, WindowInfo, WorktreeMetadata,
+    AgentType, PaneInfo, PaneStatus, PermissionMode, SessionInfo, SubagentInfo, WindowInfo,
+    WorktreeMetadata,
 };
 
 // ─── UI Snapshot Tests ─────────────────────────────────────────────
@@ -1093,8 +1094,8 @@ fn snapshot_three_groups_middle_focused_ui() {
     repo-a
       ● claude
     repo-b
-    ┃ ○ codex
-        Waiting for prompt…
+    ┃ ○ codex                  ┃
+    ┃   Waiting for prompt…    ┃
     repo-c
       ○ claude
         Waiting for prompt…
@@ -1462,6 +1463,34 @@ fn snapshot_focus_activity_log_ui() {
 // ─── Right Border Integrity ──────────────────────────────────────
 
 #[test]
+fn snapshot_focused_codex_pane_uses_accent_enclosure() {
+    let mut pane = make_pane(AgentType::Codex, PaneStatus::Running);
+    pane.prompt = "review the focused pane styling".into();
+    pane.subagents = vec![SubagentInfo {
+        label: "default #a81f".into(),
+        started_at: Some(FIXED_NOW - 125),
+    }];
+
+    let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
+    let output = render_to_string(&mut state, 32, 30);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◎0  ◐0  ○0  ✕0
+    ⓘ                            — ▾
+    project
+    ┃ ● codex                      ┃
+    ┃   └ default #a81f      ● 2m5s┃
+    ┃   review the focused pane    ┃
+    ┃   styling                    ┃
+    ╭ Git ─────────────────────────╮
+    │      Working tree clean      │
+    ╰──────────────────────────────╯
+    ╭ Activity ────────────────────╮
+    │        No activity yet       │
+    ╰──────────────────────────────╯
+    ");
+}
+
+#[test]
 fn right_border_narrow_width_with_badge() {
     let mut pane = make_pane(AgentType::Claude, PaneStatus::Running);
     pane.started_at = Some(FIXED_NOW - 7200); // 2h ago
@@ -1601,7 +1630,7 @@ fn right_border_all_permission_modes_and_agents() {
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                        — ▾
     project
-    ┃ ● codex           1h30m32s
+    ┃ ● codex          1h30m32s┃
     ╭ Git ─────────────────────╮
     │    Working tree clean    │
     ╰──────────────────────────╯
@@ -1613,7 +1642,7 @@ fn right_border_all_permission_modes_and_agents() {
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                        — ▾
     project
-    ┃ ● codex auto      1h30m32s
+    ┃ ● codex auto     1h30m32s┃
     ╭ Git ─────────────────────╮
     │    Working tree clean    │
     ╰──────────────────────────╯
@@ -1625,7 +1654,7 @@ fn right_border_all_permission_modes_and_agents() {
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                        — ▾
     project
-    ┃ ● codex dontAsk   1h30m32s
+    ┃ ● codex dontAsk  1h30m32s┃
     ╭ Git ─────────────────────╮
     │    Working tree clean    │
     ╰──────────────────────────╯
@@ -1637,7 +1666,7 @@ fn right_border_all_permission_modes_and_agents() {
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                        — ▾
     project
-    ┃ ● codex plan      1h30m32s
+    ┃ ● codex plan     1h30m32s┃
     ╭ Git ─────────────────────╮
     │    Working tree clean    │
     ╰──────────────────────────╯
@@ -1649,7 +1678,7 @@ fn right_border_all_permission_modes_and_agents() {
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                        — ▾
     project
-    ┃ ● codex edit      1h30m32s
+    ┃ ● codex edit     1h30m32s┃
     ╭ Git ─────────────────────╮
     │    Working tree clean    │
     ╰──────────────────────────╯
@@ -1661,7 +1690,7 @@ fn right_border_all_permission_modes_and_agents() {
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                        — ▾
     project
-    ┃ ● codex !         1h30m32s
+    ┃ ● codex !        1h30m32s┃
     ╭ Git ─────────────────────╮
     │    Working tree clean    │
     ╰──────────────────────────╯

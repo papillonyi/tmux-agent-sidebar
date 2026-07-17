@@ -1,6 +1,6 @@
 use ratatui::{style::Style, text::Line};
 
-use crate::tmux::PaneStatus;
+use crate::tmux::{AgentType, PaneStatus};
 use crate::ui::colors::ColorTheme;
 use crate::ui::icons::StatusIcons;
 
@@ -21,6 +21,19 @@ use status::status_row;
 
 pub(super) use branch::sidebar_remove_marker_col;
 
+const FOCUS_ENCLOSURE_MIN_WIDTH: usize = 4;
+
+/// The two-sided enclosure is intentionally limited to the focused Codex
+/// pane. Other agents retain the compact left marker, and narrow layouts fall
+/// back to it so the enclosure never consumes the entire content budget.
+pub(super) fn has_focus_enclosure(
+    pane: &crate::tmux::PaneInfo,
+    active: bool,
+    width: usize,
+) -> bool {
+    active && pane.agent == AgentType::Codex && width >= FOCUS_ENCLOSURE_MIN_WIDTH
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_pane_lines_with_ports(
     pane: &crate::tmux::PaneInfo,
@@ -35,6 +48,7 @@ pub(super) fn render_pane_lines_with_ports(
     spinner_frame: usize,
     now: u64,
 ) -> Vec<Line<'static>> {
+    let focus_enclosure = has_focus_enclosure(pane, active, width);
     let bg = if selected {
         Some(theme.selection_bg)
     } else {
@@ -44,28 +58,49 @@ pub(super) fn render_pane_lines_with_ports(
         Some(c) => style.bg(c),
         None => style,
     };
-    // The left marker `┃` highlights the pane that is currently focused in
-    // tmux (`active`). To keep the active accent compact, it only appears on
-    // the status row and the branch/ports row (when present) — never on
-    // deeper details like task progress or prompt wrapping. The sidebar
-    // cursor position (`selected`) still paints the full pane with the
-    // selection background.
+    let enclosure_style = Style::default().fg(theme.accent);
+    let framed_inner_width = width.saturating_sub(3);
+    let plain_inner_width = width.saturating_sub(2);
+    // Codex gets an accent rail on both sides while its tmux pane has focus.
+    // Other agents keep the compact `┃` marker on their primary rows. The
+    // sidebar cursor position (`selected`) remains a separate background
+    // treatment.
     let marker_ctx = RowCtx {
         marker_char: if active { SELECTION_MARKER } else { " " },
-        marker_style: if active {
+        marker_style: if focus_enclosure {
+            apply_bg(enclosure_style)
+        } else if active {
             apply_bg(Style::default().fg(theme.accent))
         } else {
             apply_bg(Style::default())
         },
-        inner_width: width.saturating_sub(2),
+        inner_width: if focus_enclosure {
+            framed_inner_width
+        } else {
+            plain_inner_width
+        },
+        right_border: focus_enclosure.then_some((SELECTION_MARKER, apply_bg(enclosure_style))),
         theme,
         bg,
         active,
     };
     let plain_ctx = RowCtx {
-        marker_char: " ",
-        marker_style: Style::default(),
-        inner_width: width.saturating_sub(2),
+        marker_char: if focus_enclosure {
+            SELECTION_MARKER
+        } else {
+            " "
+        },
+        marker_style: if focus_enclosure {
+            enclosure_style
+        } else {
+            Style::default()
+        },
+        inner_width: if focus_enclosure {
+            framed_inner_width
+        } else {
+            plain_inner_width
+        },
+        right_border: focus_enclosure.then_some((SELECTION_MARKER, enclosure_style)),
         theme,
         bg: None,
         active,
@@ -149,6 +184,7 @@ mod tests {
             marker_char: " ",
             marker_style: Style::default(),
             inner_width,
+            right_border: None,
             theme,
             bg: None,
             active,
@@ -1101,9 +1137,9 @@ mod tests {
     }
 
     #[test]
-    fn render_pane_lines_active_shows_left_marker_on_status_row() {
+    fn render_pane_lines_active_codex_uses_accent_enclosure() {
         let theme = ColorTheme::default();
-        let pane = pane(PermissionMode::Default, PaneStatus::Running, "");
+        let pane = pane(PermissionMode::Default, PaneStatus::Running, "do work");
         let lines = render_pane_lines_with_ports(
             &pane,
             &PaneGitInfo::default(),
@@ -1118,13 +1154,17 @@ mod tests {
             0,
         );
 
-        // The status row (line 0) must start with the SELECTION_MARKER in the
-        // accent fg; no BOLD is applied to the title span.
-        let marker_span = &lines[0].spans[0];
-        assert_eq!(marker_span.content, SELECTION_MARKER);
-        assert_eq!(marker_span.style.fg, Some(theme.accent));
+        // Every rendered row sits inside accent-colored left/right rails
+        // without consuming extra vertical space in a short sidebar.
+        for line in &lines {
+            assert_eq!(line.spans[0].content, SELECTION_MARKER);
+            assert_eq!(line.spans[0].style.fg, Some(theme.accent));
+            assert_eq!(line.spans.last().unwrap().content, SELECTION_MARKER);
+            assert_eq!(line.spans.last().unwrap().style.fg, Some(theme.accent));
+        }
 
-        let title_span = lines[0]
+        let status_line = &lines[0];
+        let title_span = status_line
             .spans
             .iter()
             .find(|s| s.content.contains("codex"))

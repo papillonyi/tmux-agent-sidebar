@@ -99,6 +99,7 @@ pub(super) fn collect(state: &AppState, width: u16) -> CollectedRows {
                 && row_index == state.global.selected_pane_row;
 
             let is_active = state.focus_state.focused_pane_id.as_ref() == Some(&pane.pane_id);
+            let has_focus_enclosure = row::has_focus_enclosure(pane, is_active, width);
 
             let pane_state = state.pane_state(&pane.pane_id);
             let ports = pane_state.map(|s| s.ports.as_slice());
@@ -132,8 +133,12 @@ pub(super) fn collect(state: &AppState, width: u16) -> CollectedRows {
             if pane.sidebar_spawned
                 && git_info.is_worktree
                 && pane_line_count >= 2
-                && let Some(x) =
-                    row::sidebar_remove_marker_col(git_info, ports, true, width.saturating_sub(2))
+                && let Some(x) = row::sidebar_remove_marker_col(
+                    git_info,
+                    ports,
+                    true,
+                    width.saturating_sub(if has_focus_enclosure { 3 } else { 2 }),
+                )
             {
                 collected
                     .pending_remove
@@ -267,5 +272,29 @@ mod tests {
         ];
         let collected = collect(&state, 40);
         assert_eq!(collected.pending_spawn.len(), 3);
+    }
+
+    #[test]
+    fn focused_codex_remove_target_sits_before_right_enclosure() {
+        let mut state = AppState::new("%0".into());
+        state.focus_state.focused_pane_id = Some("%1".into());
+
+        let mut pane = make_pane("%1", PaneStatus::Running);
+        pane.agent = AgentType::Codex;
+        pane.sidebar_spawned = true;
+        let git_info = PaneGitInfo {
+            repo_root: Some("/tmp/repo".into()),
+            branch: Some("feature/focus".into()),
+            is_worktree: true,
+            worktree_name: None,
+        };
+        state.repo_groups = vec![RepoGroup {
+            name: "repo".into(),
+            has_focus: true,
+            panes: vec![(pane, git_info)],
+        }];
+
+        let collected = collect(&state, 30);
+        assert_eq!(collected.pending_remove, vec![(2, 28, "%1".into())]);
     }
 }

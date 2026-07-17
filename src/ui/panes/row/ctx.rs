@@ -16,6 +16,9 @@ pub(super) struct RowCtx<'a> {
     pub(super) marker_style: Style,
     /// Usable inner width for content after the marker and its trailing space.
     pub(super) inner_width: usize,
+    /// Optional right edge of the focused-pane enclosure. The width budget
+    /// in `inner_width` already excludes this cell when it is present.
+    pub(super) right_border: Option<(&'static str, Style)>,
     pub(super) theme: &'a ColorTheme,
     pub(super) bg: Option<Color>,
     pub(super) active: bool,
@@ -42,6 +45,9 @@ impl RowCtx<'_> {
         spans.push(Span::styled(" ", bg_default));
         spans.extend(content_spans);
         spans.push(Span::styled(padding, bg_default));
+        if let Some((symbol, style)) = self.right_border {
+            spans.push(Span::styled(symbol, style));
+        }
         Line::from(spans)
     }
 
@@ -60,6 +66,9 @@ impl RowCtx<'_> {
         spans.extend(left_spans);
         spans.push(Span::styled(" ".repeat(padding), bg_default));
         spans.extend(right_spans);
+        if let Some((symbol, style)) = self.right_border {
+            spans.push(Span::styled(symbol, style));
+        }
         Line::from(spans)
     }
 }
