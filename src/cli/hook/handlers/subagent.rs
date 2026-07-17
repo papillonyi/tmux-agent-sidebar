@@ -84,6 +84,26 @@ mod tests {
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_SUBAGENTS));
     }
 
+    #[test]
+    fn on_subagent_stop_drops_event_without_id() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%SUB_STOP_NO_ID";
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Explore:sub-1");
+        tmux::test_mock::set(pane, PENDING_WORKTREE_REMOVE, "1");
+
+        for agent_id in [None, Some("")] {
+            on_subagent_stop(pane, agent_id);
+            assert_eq!(
+                tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
+                Some("Explore:sub-1")
+            );
+            assert_eq!(
+                tmux::test_mock::get(pane, PENDING_WORKTREE_REMOVE).as_deref(),
+                Some("1")
+            );
+        }
+    }
+
     // ─── deferred teardown regression tests ─────────────────────────
     //
     // These pin the invariant that WorktreeRemove fired while subagents

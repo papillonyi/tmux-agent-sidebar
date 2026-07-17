@@ -82,13 +82,13 @@ The adapter maps them into the existing event variants.
 
 Defensive behavior is intentionally asymmetric:
 
-- If `agent_type` is absent or empty but `agent_id` is present, use the display
-  type `subagent`. The UI will render `subagent #<id-prefix>` and the stop event
-  can still remove the correct instance.
-- If `agent_id` is absent or empty, do not add an active entry. An entry without
+- If `agent_type` is missing or empty but `agent_id` is non-empty, use the
+  display type `subagent`. The UI will render `subagent #<id-prefix>` and the
+  stop event can still remove the correct instance.
+- If `agent_id` is missing or empty, do not add an active entry. An entry without
   a stable id could not be matched reliably by `SubagentStop`, especially when
   multiple subagents share the same type, and could remain falsely visible.
-- A stop event without `agent_id` is a no-op for the same reason.
+- A stop event with a missing or empty `agent_id` is a no-op for the same reason.
 
 `SubagentStop` also carries `last_assistant_message` and
 `agent_transcript_path`. The adapter normalizes these fields into the
@@ -117,15 +117,17 @@ Implementation follows a red-green-refactor sequence.
 Focused Codex adapter tests will cover:
 
 - a realistic `SubagentStart` payload producing the correct type and id;
-- missing `agent_type` falling back to `subagent` when an id exists;
+- missing or empty `agent_type` falling back to `subagent` when an id exists;
 - a realistic `SubagentStop` payload producing the matching id;
-- missing ids remaining `None` in the normalized event; and
+- missing or empty `SubagentStop` ids remaining `None` in the normalized event;
+- missing or empty stop ids preserving pane subagent state and pending teardown
+  markers; and
 - the registration table remaining synchronized with accepted parse arms.
 
 Setup tests will verify that the generated Codex hook configuration contains
 both triggers and maps them to the expected `subagent-start` and
-`subagent-stop` commands. The existing handler test verifies that a missing id
-produces no pane-state change. Existing tmux parsing, parallel-instance, and UI
+`subagent-stop` commands. Direct handler tests verify that missing or empty ids
+produce no pane-state change. Existing tmux parsing, parallel-instance, and UI
 snapshot tests continue to cover the remaining shared downstream pipeline.
 
 ## Rollout
@@ -145,7 +147,8 @@ become active.
   `agent_type #<id-prefix>` rows.
 - A matching stop event removes only the completed subagent.
 - The final stop event removes the subagent tree entirely.
-- Missing `agent_type` still produces a generic `subagent` row when an id is
-  available.
-- Missing `agent_id` never creates an entry that can become permanently stale.
+- Missing or empty `agent_type` still produces a generic `subagent` row when an
+  id is available.
+- Missing or empty `agent_id` never creates an entry that can become
+  permanently stale or drains a pending teardown.
 - Claude Code behavior and the existing sidebar layout remain unchanged.

@@ -284,6 +284,19 @@ mod tests {
     }
 
     #[test]
+    fn subagent_start_empty_type_uses_generic_label() {
+        let input = json!({"agent_id": "agent-a81f1234", "agent_type": ""});
+
+        assert_eq!(
+            CodexAdapter.parse("subagent-start", &input),
+            Some(AgentEvent::SubagentStart {
+                agent_type: "subagent".into(),
+                agent_id: Some("agent-a81f1234".into()),
+            })
+        );
+    }
+
+    #[test]
     fn subagent_start_missing_id_keeps_event_untrackable() {
         let input = json!({"agent_type": "reviewer"});
 
@@ -391,6 +404,39 @@ mod tests {
                 transcript_path: String::new(),
             })
         );
+    }
+
+    #[test]
+    fn subagent_stop_empty_type_uses_generic_label() {
+        let input = json!({"agent_id": "agent-a81f1234", "agent_type": ""});
+
+        assert_eq!(
+            CodexAdapter.parse("subagent-stop", &input),
+            Some(AgentEvent::SubagentStop {
+                agent_type: "subagent".into(),
+                agent_id: Some("agent-a81f1234".into()),
+                last_message: String::new(),
+                transcript_path: String::new(),
+            })
+        );
+    }
+
+    #[test]
+    fn subagent_stop_missing_or_empty_id_keeps_event_untrackable() {
+        for input in [
+            json!({"agent_type": "reviewer"}),
+            json!({"agent_type": "reviewer", "agent_id": ""}),
+        ] {
+            assert_eq!(
+                CodexAdapter.parse("subagent-stop", &input),
+                Some(AgentEvent::SubagentStop {
+                    agent_type: "reviewer".into(),
+                    agent_id: None,
+                    last_message: String::new(),
+                    transcript_path: String::new(),
+                })
+            );
+        }
     }
 
     #[test]
