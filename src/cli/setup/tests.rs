@@ -195,6 +195,21 @@ fn snippet_codex_non_session_start_has_empty_matcher() {
 }
 
 #[test]
+fn snippet_codex_subagent_hooks_map_to_lifecycle_commands() {
+    let v = build_agent_snippet("codex", FAKE_HOOK).unwrap();
+    for (trigger, event) in [
+        ("SubagentStart", "subagent-start"),
+        ("SubagentStop", "subagent-stop"),
+    ] {
+        let command = v
+            .pointer(&format!("/hooks/{trigger}/0/hooks/0/command"))
+            .and_then(Value::as_str);
+        let expected = format!("bash /fake/hook.sh codex {event}");
+        assert_eq!(command, Some(expected.as_str()));
+    }
+}
+
+#[test]
 fn missing_hooks_is_empty_for_matching_claude_config() {
     let config = build_agent_snippet("claude", FAKE_HOOK).unwrap();
     assert!(missing_hooks("claude", &config, FAKE_HOOK).is_empty());
@@ -852,6 +867,18 @@ const EXPECTED_FULL_OUTPUT: &str = r#"{
           "trigger": "Stop"
         },
         {
+          "command": "bash /fake/hook.sh codex subagent-start",
+          "event": "subagent-start",
+          "matcher": null,
+          "trigger": "SubagentStart"
+        },
+        {
+          "command": "bash /fake/hook.sh codex subagent-stop",
+          "event": "subagent-stop",
+          "matcher": null,
+          "trigger": "SubagentStop"
+        },
+        {
           "command": "bash /fake/hook.sh codex activity-log",
           "event": "activity-log",
           "matcher": null,
@@ -887,6 +914,28 @@ const EXPECTED_FULL_OUTPUT: &str = r#"{
               "hooks": [
                 {
                   "command": "bash /fake/hook.sh codex stop",
+                  "type": "command"
+                }
+              ],
+              "matcher": ""
+            }
+          ],
+          "SubagentStart": [
+            {
+              "hooks": [
+                {
+                  "command": "bash /fake/hook.sh codex subagent-start",
+                  "type": "command"
+                }
+              ],
+              "matcher": ""
+            }
+          ],
+          "SubagentStop": [
+            {
+              "hooks": [
+                {
+                  "command": "bash /fake/hook.sh codex subagent-stop",
                   "type": "command"
                 }
               ],

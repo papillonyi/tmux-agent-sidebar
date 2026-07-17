@@ -119,16 +119,6 @@ mod tests {
         let adapter = resolve_adapter("codex").unwrap();
         assert!(adapter.parse("notification", &json!({})).is_none());
         assert!(adapter.parse("stop-failure", &json!({})).is_none());
-        assert!(
-            adapter
-                .parse("subagent-start", &json!({"agent_type": "X"}))
-                .is_none()
-        );
-        assert!(
-            adapter
-                .parse("subagent-stop", &json!({"agent_type": "X"}))
-                .is_none()
-        );
     }
 
     #[test]

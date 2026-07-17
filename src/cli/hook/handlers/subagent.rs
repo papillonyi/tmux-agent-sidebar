@@ -7,9 +7,8 @@ pub(in crate::cli::hook) fn on_subagent_start(
     agent_type: &str,
     agent_id: Option<&str>,
 ) -> i32 {
-    // Claude Code always sends agent_id per the hooks spec; drop the
-    // event silently if it's missing so the tree never gains an
-    // untrackable entry.
+    // Supported subagent hook schemas provide agent_id. Drop malformed events
+    // without it so the tree never gains an entry that SubagentStop cannot remove.
     let Some(id) = agent_id.filter(|s| !s.is_empty()) else {
         return 0;
     };

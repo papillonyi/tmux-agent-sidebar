@@ -11,14 +11,14 @@ impl CodexAdapter {
     /// Codex currently documents these lifecycle events: `SessionStart`,
     /// `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PreCompact`,
     /// `PostCompact`, `UserPromptSubmit`, `SubagentStart`, `SubagentStop`, and
-    /// `Stop`. This adapter currently wires only the four registrations below.
+    /// `Stop`. This adapter currently wires the six registrations below.
     ///
     /// Caveats:
     /// - `PostToolUse` currently covers supported Bash, `apply_patch`, and MCP
     ///   tool calls. The adapter accepts any non-empty `tool_name` and records
     ///   the resulting activity.
-    /// - `PreToolUse`, `PermissionRequest`, compaction, and subagent hooks are
-    ///   supported by Codex but not yet wired here.
+    /// - `PreToolUse`, `PermissionRequest`, and compaction hooks are supported
+    ///   by Codex but not yet wired here.
     pub const HOOK_REGISTRATIONS: &'static [HookRegistration] = &[
         HookRegistration {
             trigger: "SessionStart",
@@ -34,6 +34,16 @@ impl CodexAdapter {
             trigger: "Stop",
             matcher: None,
             kind: AgentEventKind::Stop,
+        },
+        HookRegistration {
+            trigger: "SubagentStart",
+            matcher: None,
+            kind: AgentEventKind::SubagentStart,
+        },
+        HookRegistration {
+            trigger: "SubagentStop",
+            matcher: None,
+            kind: AgentEventKind::SubagentStop,
         },
         HookRegistration {
             trigger: "PostToolUse",
@@ -74,6 +84,30 @@ impl EventAdapter for CodexAdapter {
                 agent_id: None,
                 session_id: optional_str(input, "session_id"),
             }),
+            "subagent-start" => {
+                let agent_type = json_str(input, "agent_type");
+                Some(AgentEvent::SubagentStart {
+                    agent_type: if agent_type.is_empty() {
+                        "subagent".into()
+                    } else {
+                        agent_type.into()
+                    },
+                    agent_id: optional_str(input, "agent_id"),
+                })
+            }
+            "subagent-stop" => {
+                let agent_type = json_str(input, "agent_type");
+                Some(AgentEvent::SubagentStop {
+                    agent_type: if agent_type.is_empty() {
+                        "subagent".into()
+                    } else {
+                        agent_type.into()
+                    },
+                    agent_id: optional_str(input, "agent_id"),
+                    last_message: json_str(input, "last_assistant_message").into(),
+                    transcript_path: json_str(input, "agent_transcript_path").into(),
+                })
+            }
             // Codex currently emits PostToolUse for supported Bash,
             // `apply_patch`, and MCP tool calls. Preserve the canonical tool
             // name and raw input/output so downstream labeling can handle each
@@ -217,8 +251,49 @@ mod tests {
     }
 
     #[test]
-    fn subagent_start_not_supported() {
-        assert!(CodexAdapter.parse("subagent-start", &json!({})).is_none());
+    fn subagent_start_extracts_full_payload() {
+        let input = json!({
+            "hook_event_name": "SubagentStart",
+            "session_id": "session-1",
+            "turn_id": "turn-1",
+            "agent_id": "agent-a81f1234",
+            "agent_type": "reviewer",
+            "permission_mode": "default"
+        });
+
+        assert_eq!(
+            CodexAdapter.parse("subagent-start", &input),
+            Some(AgentEvent::SubagentStart {
+                agent_type: "reviewer".into(),
+                agent_id: Some("agent-a81f1234".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn subagent_start_missing_type_uses_generic_label() {
+        let input = json!({"agent_id": "agent-a81f1234"});
+
+        assert_eq!(
+            CodexAdapter.parse("subagent-start", &input),
+            Some(AgentEvent::SubagentStart {
+                agent_type: "subagent".into(),
+                agent_id: Some("agent-a81f1234".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn subagent_start_missing_id_keeps_event_untrackable() {
+        let input = json!({"agent_type": "reviewer"});
+
+        assert_eq!(
+            CodexAdapter.parse("subagent-start", &input),
+            Some(AgentEvent::SubagentStart {
+                agent_type: "reviewer".into(),
+                agent_id: None,
+            })
+        );
     }
 
     #[test]
@@ -279,8 +354,43 @@ mod tests {
     }
 
     #[test]
-    fn subagent_stop_not_supported() {
-        assert!(CodexAdapter.parse("subagent-stop", &json!({})).is_none());
+    fn subagent_stop_extracts_full_payload() {
+        let input = json!({
+            "hook_event_name": "SubagentStop",
+            "session_id": "session-1",
+            "turn_id": "turn-1",
+            "agent_id": "agent-a81f1234",
+            "agent_type": "reviewer",
+            "agent_transcript_path": "/tmp/codex-subagent.jsonl",
+            "last_assistant_message": "Review complete",
+            "stop_hook_active": false,
+            "permission_mode": "default"
+        });
+
+        assert_eq!(
+            CodexAdapter.parse("subagent-stop", &input),
+            Some(AgentEvent::SubagentStop {
+                agent_type: "reviewer".into(),
+                agent_id: Some("agent-a81f1234".into()),
+                last_message: "Review complete".into(),
+                transcript_path: "/tmp/codex-subagent.jsonl".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn subagent_stop_missing_type_uses_generic_label() {
+        let input = json!({"agent_id": "agent-a81f1234"});
+
+        assert_eq!(
+            CodexAdapter.parse("subagent-stop", &input),
+            Some(AgentEvent::SubagentStop {
+                agent_type: "subagent".into(),
+                agent_id: Some("agent-a81f1234".into()),
+                last_message: String::new(),
+                transcript_path: String::new(),
+            })
+        );
     }
 
     #[test]
