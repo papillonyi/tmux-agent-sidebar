@@ -7,13 +7,22 @@ pub(in crate::cli::hook) fn on_subagent_start(
     agent_type: &str,
     agent_id: Option<&str>,
 ) -> i32 {
+    on_subagent_start_at(pane, agent_type, agent_id, crate::time::now_epoch_secs())
+}
+
+fn on_subagent_start_at(
+    pane: &str,
+    agent_type: &str,
+    agent_id: Option<&str>,
+    started_at: u64,
+) -> i32 {
     // Supported subagent hook schemas provide agent_id. Drop malformed events
     // without it so the tree never gains an entry that SubagentStop cannot remove.
     let Some(id) = agent_id.filter(|s| !s.is_empty()) else {
         return 0;
     };
     let current = tmux::get_pane_option_value(pane, tmux::PANE_SUBAGENTS);
-    let new_val = append_subagent(&current, agent_type, id);
+    let new_val = append_subagent(&current, agent_type, id, started_at);
     tmux::set_pane_option(pane, tmux::PANE_SUBAGENTS, &new_val);
     0
 }
@@ -62,15 +71,15 @@ mod tests {
     fn on_subagent_start_appends_to_list() {
         let _guard = tmux::test_mock::install();
         let pane = "%SUB_START";
-        on_subagent_start(pane, "Explore", Some("sub-1"));
+        on_subagent_start_at(pane, "Explore", Some("sub-1"), 1_700_000_000);
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
-            Some("Explore:sub-1")
+            Some("Explore:sub-1;started_at=1700000000")
         );
-        on_subagent_start(pane, "Plan", Some("sub-2"));
+        on_subagent_start_at(pane, "Plan", Some("sub-2"), 1_700_000_005);
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
-            Some("Explore:sub-1,Plan:sub-2")
+            Some("Explore:sub-1;started_at=1700000000,Plan:sub-2;started_at=1700000005")
         );
     }
 

@@ -4,9 +4,9 @@ use ratatui::{
 };
 
 use super::ctx::RowCtx;
-use crate::tmux::PaneStatus;
+use crate::tmux::{PaneStatus, SubagentInfo};
 use crate::ui::text::{
-    display_width, truncate_to_width, wait_reason_label, wrap_text, wrap_text_char,
+    display_width, elapsed_label, truncate_to_width, wait_reason_label, wrap_text, wrap_text_char,
 };
 
 pub(super) fn task_progress_row(
@@ -45,7 +45,11 @@ pub(super) fn task_progress_row(
     ))
 }
 
-pub(super) fn subagent_rows(subagents: &[String], ctx: &RowCtx) -> Vec<Line<'static>> {
+pub(super) fn subagent_rows(
+    subagents: &[SubagentInfo],
+    ctx: &RowCtx,
+    now: u64,
+) -> Vec<Line<'static>> {
     if subagents.is_empty() {
         return Vec::new();
     }
@@ -54,19 +58,45 @@ pub(super) fn subagent_rows(subagents: &[String], ctx: &RowCtx) -> Vec<Line<'sta
     let tree_color = theme.text_muted;
     let last_idx = subagents.len() - 1;
     let mut out = Vec::with_capacity(subagents.len());
-    for (i, sa) in subagents.iter().enumerate() {
+    for (i, subagent) in subagents.iter().enumerate() {
         let connector = if i == last_idx { "└ " } else { "├ " };
-        let numbered = if sa.contains('#') {
-            sa.clone()
+        let numbered = if subagent.label.contains('#') {
+            subagent.label.clone()
         } else {
-            format!("{} #{}", sa, i + 1)
+            format!("{} #{}", subagent.label, i + 1)
         };
+
+        let elapsed = elapsed_label(subagent.started_at, now);
+        let max_elapsed_width = ctx.inner_width.saturating_sub(2);
+        let elapsed = truncate_to_width(&elapsed, max_elapsed_width);
+        let elapsed_gap = usize::from(!elapsed.is_empty());
+        let active_width = usize::from(ctx.inner_width > 0);
+        let right_width = active_width + elapsed_gap + display_width(&elapsed);
+        let right_gap = usize::from(ctx.inner_width > right_width);
+        let left_budget = ctx.inner_width.saturating_sub(right_width + right_gap);
+
         let prefix = format!("  {}", connector);
+        let prefix = truncate_to_width(&prefix, left_budget);
         let prefix_dw = display_width(&prefix);
-        let max_sa_w = ctx.inner_width.saturating_sub(prefix_dw);
+        let max_sa_w = left_budget.saturating_sub(prefix_dw);
         let truncated_sa = truncate_to_width(&numbered, max_sa_w);
-        let text_dw = prefix_dw + display_width(&truncated_sa);
-        out.push(ctx.row_line(
+        let left_width = prefix_dw + display_width(&truncated_sa);
+
+        let mut right_spans = Vec::with_capacity(2);
+        if active_width > 0 {
+            right_spans.push(Span::styled(
+                "●",
+                ctx.apply_bg(Style::default().fg(theme.status_running)),
+            ));
+        }
+        if !elapsed.is_empty() {
+            right_spans.push(Span::styled(
+                format!(" {elapsed}"),
+                ctx.apply_bg(Style::default().fg(theme.text_active)),
+            ));
+        }
+
+        out.push(ctx.row_line_split(
             vec![
                 Span::styled(prefix, ctx.apply_bg(Style::default().fg(tree_color))),
                 Span::styled(
@@ -74,7 +104,9 @@ pub(super) fn subagent_rows(subagents: &[String], ctx: &RowCtx) -> Vec<Line<'sta
                     ctx.apply_bg(Style::default().fg(subagent_color)),
                 ),
             ],
-            text_dw,
+            left_width,
+            right_spans,
+            right_width,
         ));
     }
     out

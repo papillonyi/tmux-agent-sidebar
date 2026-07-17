@@ -16,7 +16,7 @@ pub struct PaneInfo {
     pub started_at: Option<u64>,
     pub wait_reason: String,
     pub permission_mode: PermissionMode,
-    pub subagents: Vec<String>,
+    pub subagents: Vec<SubagentInfo>,
     pub pane_pid: Option<u32>,
     pub worktree: WorktreeMetadata,
     pub session_id: Option<String>,
@@ -30,6 +30,30 @@ pub struct PaneInfo {
     /// pane status is `Background` (or `Running` with a backgrounded shell
     /// still alive) so the row body can surface the actual command.
     pub bg_shell_cmd: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentInfo {
+    pub label: String,
+    pub started_at: Option<u64>,
+}
+
+impl From<&str> for SubagentInfo {
+    fn from(label: &str) -> Self {
+        Self {
+            label: label.into(),
+            started_at: None,
+        }
+    }
+}
+
+impl From<String> for SubagentInfo {
+    fn from(label: String) -> Self {
+        Self {
+            label,
+            started_at: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]

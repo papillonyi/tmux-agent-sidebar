@@ -2,6 +2,7 @@ mod commands;
 mod options;
 mod panes;
 mod query;
+mod subagent;
 mod types;
 
 pub use commands::{
@@ -37,9 +38,10 @@ pub use panes::{
 };
 pub use query::query_sessions;
 pub(crate) use query::query_sessions_with_process_snapshot;
+pub(crate) use subagent::{encode_subagent_entry, subagent_entry_agent_id};
 pub use types::{
     AgentType, CLAUDE_AGENT, CODEX_AGENT, OPENCODE_AGENT, PaneInfo, PaneStatus, PermissionMode,
-    SessionInfo, WindowInfo, WorktreeMetadata,
+    SessionInfo, SubagentInfo, WindowInfo, WorktreeMetadata,
 };
 
 #[cfg(test)]

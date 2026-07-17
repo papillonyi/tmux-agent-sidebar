@@ -1026,8 +1026,8 @@ fn snapshot_all_elements_combined_ui() {
     ┃ ◐ claude auto
     ┃   main
         ✔◼ 1/2
-        ├ Explore #1
-        └ Plan #2
+        ├ Explore #1             ●
+        └ Plan #2                ●
         permission required
         fixing the bug
     ╭ Git ───────────────────────╮

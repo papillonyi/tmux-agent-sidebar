@@ -80,7 +80,7 @@ pub(super) fn render_pane_lines_with_ports(
     if let Some(line) = task_progress_row(task_progress, ctx) {
         out.push(line);
     }
-    out.extend(subagent_rows(&pane.subagents, ctx));
+    out.extend(subagent_rows(&pane.subagents, ctx, now));
     if let Some(line) = wait_reason_row(&pane.wait_reason, &pane.status, ctx) {
         out.push(line);
     }
@@ -99,7 +99,7 @@ pub(super) fn render_pane_lines_with_ports(
 mod tests {
     use super::*;
     use crate::group::PaneGitInfo;
-    use crate::tmux::{AgentType, PaneInfo, PermissionMode, WorktreeMetadata};
+    use crate::tmux::{AgentType, PaneInfo, PermissionMode, SubagentInfo, WorktreeMetadata};
     use crate::ui::icons::StatusIcons;
     use crate::ui::text::display_width;
     use ratatui::style::{Color, Modifier};
@@ -562,7 +562,10 @@ mod tests {
     fn render_pane_lines_shows_single_subagent() {
         let theme = ColorTheme::default();
         let mut p = pane(PermissionMode::Default, PaneStatus::Running, "test");
-        p.subagents = vec!["Explore".into()];
+        p.subagents = vec![SubagentInfo {
+            label: "Explore #sub1".into(),
+            started_at: Some(1_000_000 - 125),
+        }];
         let lines = render_pane_lines_with_ports(
             &p,
             &PaneGitInfo::default(),
@@ -574,13 +577,12 @@ mod tests {
             &StatusIcons::default(),
             &theme,
             0,
-            0,
+            1_000_000,
         );
 
         assert!(lines.len() >= 3);
         let sub_line = line_text(&lines[1]);
-        assert!(sub_line.contains("└ "));
-        assert!(sub_line.contains("Explore #1"));
+        insta::assert_snapshot!(sub_line, @"    └ Explore #sub1               ● 2m5s");
     }
 
     #[test]

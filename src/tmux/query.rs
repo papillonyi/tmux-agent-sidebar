@@ -10,6 +10,7 @@ use super::options::{
     PANE_SESSION_ID, PANE_STARTED_AT, PANE_STATUS, PANE_SUBAGENTS, PANE_WAIT_REASON,
     PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME, unset_pane_option,
 };
+use super::subagent::parse_subagent_info;
 use super::types::{
     AgentType, CODEX_AGENT, PaneInfo, PaneStatus, PermissionMode, SessionInfo, WindowInfo,
     WorktreeMetadata,
@@ -495,30 +496,18 @@ fn sanitize_prompt(raw: &str) -> String {
 }
 
 /// Parse subagent list from tmux variable.
-/// Format: comma-separated "type" entries, e.g. "Explore,Explore,Plan"
 /// Parse the comma-separated `@pane_subagents` value into display strings.
 ///
-/// Each entry is either `agent_type` (legacy) or `agent_type:agent_id`
-/// (current). When an `agent_id` is present, the entry is rendered as
-/// `"agent_type #<id-prefix>"` where `<id-prefix>` is the first 4 characters
-/// of the id — stable per instance, so the UI label does not shift when
-/// sibling subagents stop. The `#` embedding is recognized by the `#`-based
-/// numbering branch in `subagent_rows`, which keeps it verbatim.
-fn parse_subagents(raw: &str) -> Vec<String> {
-    const ID_PREFIX_LEN: usize = 4;
+/// Current entries carry `agent_type`, `agent_id`, and a locally observed start
+/// time. Legacy type-only and `agent_type:agent_id` entries remain supported.
+fn parse_subagents(raw: &str) -> Vec<super::types::SubagentInfo> {
     if raw.is_empty() {
         return vec![];
     }
     raw.split(',')
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
-        .map(|entry| match entry.split_once(':') {
-            Some((ty, id)) if !id.is_empty() => {
-                let prefix: String = id.chars().take(ID_PREFIX_LEN).collect();
-                format!("{} #{}", ty, prefix)
-            }
-            _ => entry.to_string(),
-        })
+        .map(parse_subagent_info)
         .collect()
 }
 
@@ -699,20 +688,27 @@ mod tests {
 
     // ─── parse_subagents tests ──────────────────────────────────────
 
+    fn subagent_labels(raw: &str) -> Vec<String> {
+        parse_subagents(raw)
+            .into_iter()
+            .map(|subagent| subagent.label)
+            .collect()
+    }
+
     #[test]
     fn parse_subagents_empty() {
-        assert_eq!(parse_subagents(""), Vec::<String>::new());
+        assert_eq!(subagent_labels(""), Vec::<String>::new());
     }
 
     #[test]
     fn parse_subagents_single() {
-        assert_eq!(parse_subagents("Explore"), vec!["Explore"]);
+        assert_eq!(subagent_labels("Explore"), vec!["Explore"]);
     }
 
     #[test]
     fn parse_subagents_multiple() {
         assert_eq!(
-            parse_subagents("Explore,Plan,Bash"),
+            subagent_labels("Explore,Plan,Bash"),
             vec!["Explore", "Plan", "Bash"]
         );
     }
@@ -720,7 +716,7 @@ mod tests {
     #[test]
     fn parse_subagents_duplicates() {
         assert_eq!(
-            parse_subagents("Explore,Explore,Plan"),
+            subagent_labels("Explore,Explore,Plan"),
             vec!["Explore", "Explore", "Plan"]
         );
     }
@@ -731,7 +727,7 @@ mod tests {
         // `#<prefix>` label so surviving siblings do not renumber when
         // another subagent stops.
         assert_eq!(
-            parse_subagents("Explore:sub123456,Plan:abc987654"),
+            subagent_labels("Explore:sub123456,Plan:abc987654"),
             vec!["Explore #sub1", "Plan #abc9"]
         );
     }
@@ -741,7 +737,7 @@ mod tests {
         // Two subagents of the same type get distinct labels from their ids,
         // which is the whole point of id-based tagging.
         assert_eq!(
-            parse_subagents("Explore:aaaa1111,Explore:bbbb2222"),
+            subagent_labels("Explore:aaaa1111,Explore:bbbb2222"),
             vec!["Explore #aaaa", "Explore #bbbb"]
         );
     }
@@ -750,7 +746,7 @@ mod tests {
     fn parse_subagents_id_shorter_than_prefix_len_uses_full_id() {
         // Short ids (e.g. test fixtures like "s1") render in full rather
         // than being padded or truncated to nothing.
-        assert_eq!(parse_subagents("Plan:s1"), vec!["Plan #s1"]);
+        assert_eq!(subagent_labels("Plan:s1"), vec!["Plan #s1"]);
     }
 
     #[test]
@@ -758,9 +754,20 @@ mod tests {
         // Stale entry written before id tracking (or by an older build)
         // falls back to the bare type name.
         assert_eq!(
-            parse_subagents("Explore,Plan:sub-999"),
+            subagent_labels("Explore,Plan:sub-999"),
             vec!["Explore", "Plan #sub-"]
         );
+    }
+
+    #[test]
+    fn parse_subagents_preserves_started_at() {
+        let parsed = parse_subagents(
+            "Explore:sub123456;started_at=1699999875,Plan:abc987654;started_at=1699999990",
+        );
+        assert_eq!(parsed[0].label, "Explore #sub1");
+        assert_eq!(parsed[0].started_at, Some(1_699_999_875));
+        assert_eq!(parsed[1].label, "Plan #abc9");
+        assert_eq!(parsed[1].started_at, Some(1_699_999_990));
     }
 
     // ─── parse_pane_line tests ──────────────────────────────────────
@@ -818,7 +825,13 @@ mod tests {
         assert!(!pane.prompt_is_response);
         assert_eq!(pane.started_at, Some(1700000000));
         assert_eq!(pane.pane_pid, Some(12345));
-        assert_eq!(pane.subagents, vec!["Explore", "Plan"]);
+        assert_eq!(
+            pane.subagents
+                .iter()
+                .map(|subagent| subagent.label.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Explore", "Plan"]
+        );
         assert_eq!(pane.permission_mode, PermissionMode::Auto);
     }
 

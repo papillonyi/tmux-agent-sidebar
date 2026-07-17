@@ -5,7 +5,9 @@ use ratatui::style::Color;
 use test_helpers::*;
 use tmux_agent_sidebar::activity::{ActivityEntry, TaskProgress, TaskStatus};
 use tmux_agent_sidebar::state::{BottomPanel, Focus};
-use tmux_agent_sidebar::tmux::{AgentType, PaneStatus, PermissionMode, SessionInfo, WindowInfo};
+use tmux_agent_sidebar::tmux::{
+    AgentType, PaneStatus, PermissionMode, SessionInfo, SubagentInfo, WindowInfo,
+};
 use tmux_agent_sidebar::ui::colors::ColorTheme;
 
 // ─── ColorTheme Default Values ──────────────────────────────────────
@@ -425,7 +427,10 @@ fn test_task_progress_line_uses_task_progress_color() {
 #[test]
 fn test_subagent_line_uses_subagent_color() {
     let mut pane = make_pane(AgentType::Claude, PaneStatus::Running);
-    pane.subagents = vec!["Explore #1".into()];
+    pane.subagents = vec![SubagentInfo {
+        label: "Explore #1".into(),
+        started_at: Some(FIXED_NOW - 125),
+    }];
 
     let mut state = make_state(vec![SessionInfo {
         session_name: "main".into(),
@@ -441,14 +446,13 @@ fn test_subagent_line_uses_subagent_color() {
     state.rebuild_row_targets();
     state.focus_state.sidebar_focused = false;
 
-    // Styled snapshot locks in the subagent line color (fg:73) plus the
-    // rendered "Explore #1" label.
+    // Styled snapshot locks in the label, active-dot, and elapsed-time colors.
     insta::assert_snapshot!(render_to_styled_string(&mut state, 40, 27), @"
      ≡[fg:111]1[fg:255]  ●[fg:245]1[fg:255]  ◎[fg:245]0[fg:245]  ◐[fg:245]0[fg:245]  ○[fg:245]0[fg:245]  ✕[fg:245]0[fg:245]
     ⓘ[fg:221]                                    —[fg:252] ▾[fg:252]
     p[fg:153]r[fg:153]o[fg:153]j[fg:153]e[fg:153]c[fg:153]t[fg:153]
     ┃[fg:153] ●[fg:82] [fg:174]c[fg:174]l[fg:174]a[fg:174]u[fg:174]d[fg:174]e[fg:174]
-       [fg:252] [fg:252]└[fg:252] [fg:252]E[fg:73]x[fg:73]p[fg:73]l[fg:73]o[fg:73]r[fg:73]e[fg:73] [fg:73]#[fg:73]1[fg:73]
+       [fg:252] [fg:252]└[fg:252] [fg:252]E[fg:73]x[fg:73]p[fg:73]l[fg:73]o[fg:73]r[fg:73]e[fg:73] [fg:73]#[fg:73]1[fg:73]                  ●[fg:114] [fg:255]2[fg:255]m[fg:255]5[fg:255]s[fg:255]
 
 
     ╭[fg:240] [fg:240]G[fg:252]i[fg:252]t[fg:252] [fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]╮[fg:240]

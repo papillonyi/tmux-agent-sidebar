@@ -4,7 +4,7 @@ mod test_helpers;
 use test_helpers::*;
 use tmux_agent_sidebar::activity::ActivityEntry;
 use tmux_agent_sidebar::state::{BottomPanel, Focus};
-use tmux_agent_sidebar::tmux::{AgentType, PaneStatus, SessionInfo, WindowInfo};
+use tmux_agent_sidebar::tmux::{AgentType, PaneStatus, SessionInfo, SubagentInfo, WindowInfo};
 
 // ─── Bottom Panel Tests ────────────────────────────────────────────
 
@@ -829,7 +829,20 @@ fn snapshot_git_pr_with_diff_ui() {
 #[test]
 fn snapshot_subagents_tree_ui() {
     let mut pane = make_pane(AgentType::Claude, PaneStatus::Running);
-    pane.subagents = vec!["Explore #1".into(), "Plan".into(), "Explore #2".into()];
+    pane.subagents = vec![
+        SubagentInfo {
+            label: "Explore #1".into(),
+            started_at: Some(FIXED_NOW - 125),
+        },
+        SubagentInfo {
+            label: "Plan".into(),
+            started_at: Some(FIXED_NOW - 45),
+        },
+        SubagentInfo {
+            label: "Explore #2".into(),
+            started_at: Some(FIXED_NOW - 10),
+        },
+    ];
 
     let mut state = make_state(vec![SessionInfo {
         session_name: "main".into(),
@@ -850,9 +863,9 @@ fn snapshot_subagents_tree_ui() {
     ⓘ                                    — ▾
     project
     ┃ ● claude
-        ├ Explore #1
-        ├ Plan #2
-        └ Explore #2
+        ├ Explore #1                  ● 2m5s
+        ├ Plan #2                      ● 45s
+        └ Explore #2                   ● 10s
     ╭ Git ─────────────────────────────────╮
     │          Working tree clean          │
     ╰──────────────────────────────────────╯
@@ -866,8 +879,14 @@ fn snapshot_subagents_tree_ui() {
 fn snapshot_subagent_long_name_truncated_ui() {
     let mut pane = make_pane(AgentType::Claude, PaneStatus::Running);
     pane.subagents = vec![
-        "superpowers:code-reviewer".into(),
-        "claude-code-guide".into(),
+        SubagentInfo {
+            label: "superpowers:code-reviewer".into(),
+            started_at: Some(FIXED_NOW - 125),
+        },
+        SubagentInfo {
+            label: "claude-code-guide".into(),
+            started_at: Some(FIXED_NOW - 10),
+        },
     ];
 
     let mut state = make_state(vec![SessionInfo {
@@ -890,8 +909,8 @@ fn snapshot_subagent_long_name_truncated_ui() {
     ⓘ                        — ▾
     project
     ┃ ● claude
-        ├ superpowers:code-revi…
-        └ claude-code-guide #2
+        ├ superpowers:co… ● 2m5s
+        └ claude-code-gui… ● 10s
     ╭ Git ─────────────────────╮
     │    Working tree clean    │
     ╰──────────────────────────╯

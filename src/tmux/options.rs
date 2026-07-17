@@ -68,7 +68,8 @@ pub const PANE_SESSION_ID: &str = "@pane_session_id";
 pub const PANE_STARTED_AT: &str = "@pane_started_at";
 /// High-level status (`idle` / `running` / `waiting` / `clear`).
 pub const PANE_STATUS: &str = "@pane_status";
-/// Comma-separated `Type:id` list of currently-active subagents.
+/// Comma-separated `Type:id;started_at=<epoch-seconds>` list of currently-active
+/// subagents. Legacy `Type` and `Type:id` entries remain readable.
 /// Non-empty ⇒ the pane is hosting subagent events and writes
 /// from their hooks must be filtered out of parent metadata.
 pub const PANE_SUBAGENTS: &str = "@pane_subagents";
