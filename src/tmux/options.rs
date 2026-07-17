@@ -50,7 +50,7 @@ pub const PANE_PENDING_WORKTREE_REMOVE: &str = "@pane_pending_worktree_remove";
 /// Permission mode in use by the agent (e.g. `plan`,
 /// `acceptEdits`, `bypassPermissions`).
 pub const PANE_PERMISSION_MODE: &str = "@pane_permission_mode";
-/// Last user prompt the agent received. Shown in the bottom tab
+/// Last user prompt the agent received. Shown in the Activity panel
 /// as activity context.
 pub const PANE_PROMPT: &str = "@pane_prompt";
 /// Where the prompt came from (e.g. `UserPromptSubmit` vs

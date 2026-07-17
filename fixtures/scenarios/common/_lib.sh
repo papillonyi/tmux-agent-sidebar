@@ -357,7 +357,7 @@ capture_loop() {
 # Single-frame capture. Output goes to $OUT/<SESSION>.html. Scenarios
 # can set CROP_ROWS=N:M and/or CROP_COLS=N:M (END exclusive) to trim
 # the rendered grid before it becomes HTML — e.g. just the Activity
-# tab, just a popup, etc.
+# panel, just a popup, etc.
 capture_single() {
     local crop_args=()
     if [[ -n "${CROP_ROWS:-}" ]]; then

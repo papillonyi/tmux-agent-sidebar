@@ -12,8 +12,8 @@ pub struct PaneRuntimeState {
     pub task_progress: Option<TaskProgress>,
     pub task_dismissed_total: Option<usize>,
     pub inactive_since: Option<u64>,
-    /// Last bottom tab the user selected while this pane was focused.
-    /// `None` until the user changes tabs at least once. Cleaned up
+    /// Last bottom panel the user selected while this pane was focused.
+    /// `None` until the active panel changes at least once. Cleaned up
     /// automatically by `prune_pane_states_to_current_panes` when the
     /// pane disappears, so a relaunched pane starts fresh.
     pub bottom_panel_pref: Option<BottomPanel>,

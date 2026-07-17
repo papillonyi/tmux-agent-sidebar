@@ -27,7 +27,7 @@ OpenCode uses a small local plugin bridge instead of per-event hook config. The 
 
 - tmux 3.0+
 - [TPM](https://github.com/tmux-plugins/tpm) (or the manual install in [Installation](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/installation/))
-- [GitHub CLI](https://cli.github.com/) (optional — required only for PR numbers in the Git tab)
+- [GitHub CLI](https://cli.github.com/) (optional — required only for PR numbers in the Git panel)
 
 ## Quick Start
 
@@ -71,7 +71,7 @@ The [documentation site](https://hiroppy.github.io/tmux-agent-sidebar/) covers e
 
 - [Agent pane breakdown](https://hiroppy.github.io/tmux-agent-sidebar/features/agent-pane/)
 - [Worktree lifecycle](https://hiroppy.github.io/tmux-agent-sidebar/features/worktree/)
-- [Activity log](https://hiroppy.github.io/tmux-agent-sidebar/features/activity-log/) · [Git tab](https://hiroppy.github.io/tmux-agent-sidebar/features/git-status/) · [Notifications](https://hiroppy.github.io/tmux-agent-sidebar/features/notifications/)
+- [Activity log](https://hiroppy.github.io/tmux-agent-sidebar/features/activity-log/) · [Git panel](https://hiroppy.github.io/tmux-agent-sidebar/features/git-status/) · [Notifications](https://hiroppy.github.io/tmux-agent-sidebar/features/notifications/)
 - [Agent support matrix](https://hiroppy.github.io/tmux-agent-sidebar/agents/)
 - [Keybindings](https://hiroppy.github.io/tmux-agent-sidebar/reference/keybindings/) · [tmux options](https://hiroppy.github.io/tmux-agent-sidebar/reference/tmux-options/) · [Scripting](https://hiroppy.github.io/tmux-agent-sidebar/reference/scripting/)
 

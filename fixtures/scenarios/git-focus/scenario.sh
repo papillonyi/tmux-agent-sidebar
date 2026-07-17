@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Single-frame snapshot cropped to the Git tab at the bottom.
+# Single-frame snapshot cropped to the stacked bottom panels with Git active.
 #
-# To demonstrate every Git-tab feature (branch, ahead/behind,
+# To demonstrate every Git-panel feature (branch, ahead/behind,
 # diff-shortstat, PR number, and all three Staged/Unstaged/Untracked
 # sections), the focused pane's cwd is pointed at a purpose-built
 # throwaway repo:
@@ -147,7 +147,7 @@ tmux respawn-pane -k -t "$PANE_WAITING" -c "$FAKE_REPO" \
 tmux respawn-pane -k -t "$SIDEBAR_PANE" -e "PATH=$PATH" "$BIN"
 sleep 2.0
 
-# Switch the bottom panel to the Git tab and give the git worker a
+# Select the Git panel and give the git worker a
 # beat to finish its fetch cycle (shortstat, ahead/behind, gh PR).
 tmux send-keys -t "$SIDEBAR_PANE" BTab
 sleep 1.5

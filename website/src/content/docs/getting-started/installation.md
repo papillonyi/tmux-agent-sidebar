@@ -7,7 +7,7 @@ description: Install tmux-agent-sidebar via TPM or manually.
 
 - tmux 3.0+
 - [TPM](https://github.com/tmux-plugins/tpm) (for plugin installation)
-- [GitHub CLI](https://cli.github.com/) (optional, for displaying PR numbers in the Git tab)
+- [GitHub CLI](https://cli.github.com/) (optional, for displaying PR numbers in the Git panel)
 - [Rust](https://rustup.rs/) (only if building from source)
 
 ## Option A — TPM (recommended)

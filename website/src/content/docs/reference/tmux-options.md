@@ -43,7 +43,7 @@ Most options must be set **before** loading the plugin in your `tmux.conf`. Colo
 
 | Option                     | Default              | What it paints                                                                                          |
 | -------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------- |
-| `@sidebar_color_border`    | `240`&nbsp;(dark gray)    | Unfocused panel borders and tab separators                                                              |
+| `@sidebar_color_border`    | `240`&nbsp;(dark gray)    | Unfocused panel borders                                                                                 |
 | `@sidebar_color_accent`    | `153`&nbsp;(pale sky blue) | Active pane marker, focused repo header, focused bottom panel border, repo popup border — the brand color |
 | `@sidebar_color_session`   | `39`&nbsp;(blue)          | Session name                                                                                            |
 | `@sidebar_color_selection` | `239`&nbsp;(dark gray)    | Selected row background                                                                                 |
@@ -61,7 +61,7 @@ Most options must be set **before** loading the plugin in your `tmux.conf`. Colo
 | Option                         | Default          | What it paints                                                                                   |
 | ------------------------------ | ---------------- | ------------------------------------------------------------------------------------------------ |
 | `@sidebar_color_text_active`   | `255`&nbsp;(white)    | Primary text — active rows, counts, filtered repo label                                          |
-| `@sidebar_color_text_muted`    | `252`&nbsp;(light gray) | Secondary text — tree branches, empty-state messages, inactive bottom tabs, activity log labels |
+| `@sidebar_color_text_muted`    | `252`&nbsp;(light gray) | Secondary text — tree branches, empty-state messages, inactive panel titles, activity log labels |
 | `@sidebar_color_text_inactive` | `244`&nbsp;(mid gray) | Body text of unfocused pane rows — prompt / response, idle hint                                  |
 | `@sidebar_color_port`          | `246`&nbsp;(light gray) | Port numbers                                                                                   |
 | `@sidebar_color_wait_reason`   | `221`&nbsp;(yellow)   | Wait reason text                                                                                 |
@@ -74,7 +74,7 @@ Most options must be set **before** loading the plugin in your `tmux.conf`. Colo
 | `@sidebar_color_task_progress`  | `223`&nbsp;(pale yellow) | Task progress summary |
 | `@sidebar_color_subagent`       | `73`&nbsp;(soft teal)  | Sub-agent tree        |
 
-## Git tab colors
+## Git panel colors
 
 | Option                          | Default            | What it paints      |
 | ------------------------------- | ------------------ | ------------------- |

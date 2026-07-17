@@ -117,7 +117,7 @@ fn basename(path: &str) -> String {
 }
 
 /// Subagent output: prefer the response text (`content[].type=="text"`) so
-/// the Activity tab shows what came back, not just what the parent asked
+/// the Activity panel shows what came back, not just what the parent asked
 /// for. Falls back to the prompt's `description` when the response is
 /// missing (e.g. errors) so the entry is never blank.
 fn label_agent(input: &Value, response: &Value) -> String {

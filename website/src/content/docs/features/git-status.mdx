@@ -6,9 +6,11 @@ description: Branch, diff, PR number, and ahead/behind state for the focused pan
 import { Image } from 'astro:assets';
 import gitFocus from '../../../assets/captures/git-focus.png';
 
-<Image src={gitFocus} alt="Git tab screenshot" densities={[1.5, 2]} />
+<Image src={gitFocus} alt="Git panel screenshot" densities={[1.5, 2]} />
 
-The bottom panel's **Git** tab surfaces the git state of the pane's cwd.
+The upper **Git** panel surfaces the git state of the focused pane's cwd. It is
+shown above Activity and remains visible regardless of which panel currently
+receives scrolling input.
 
 ## Header
 
@@ -36,4 +38,6 @@ Status letters:
 
 Each section lists up to 10 entries and collapses the rest into a `+N more` row.
 
-Git data is refreshed from a background polling thread, so interaction with the sidebar stays snappy even in repositories with slow git operations.
+Git data is refreshed every two seconds from a background polling thread while
+the bottom panels are visible, so interaction with the sidebar stays snappy
+even in repositories with slow git operations.

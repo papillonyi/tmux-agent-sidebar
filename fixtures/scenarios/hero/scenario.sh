@@ -24,7 +24,7 @@ build_layout
 paint_stream "$MAIN_PANE" \
     "$ROOT/fixtures/scenarios/hero/main-pane.stream"
 
-# Seed the Activity tab with recent tool calls + tasks on the
+# Seed the Activity panel with recent tool calls + tasks on the
 # focused (Codex Waiting) pane — the fix/login-redirect
 # investigation right before it hit the permission prompt.
 cat >> "$FOCUSED_LOG" <<'ACTIVITY'

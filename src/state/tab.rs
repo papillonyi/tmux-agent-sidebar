@@ -1,11 +1,11 @@
 use super::{AppState, BottomPanel};
 
 impl AppState {
-    /// Auto-switch bottom tab based on the focused pane.
+    /// Select the active bottom panel based on the focused pane.
     ///
-    /// - Focus changed → save old pane's tab, restore new pane's tab
-    /// - New agent pane (first seen) → Activity tab (once only)
-    /// - Non-agent pane with no saved pref → Git tab
+    /// - Focus changed → save the old pane's target, restore the new pane's target
+    /// - New agent pane (first seen) → Activity panel (once only)
+    /// - Non-agent pane with no saved preference → Git panel
     pub(crate) fn auto_select_bottom_panel(&mut self) {
         let focus_changed =
             self.focus_state.focused_pane_id != self.focus_state.prev_focused_pane_id;
@@ -13,14 +13,14 @@ impl AppState {
             self.save_current_bottom_panel();
         }
         // detect_new_agents cleans up disappeared agents (removing their
-        // seen status and saved tab prefs), so it must run after save
+        // seen status and saved panel prefs), so it must run after save
         // to avoid re-saving a stale pref for a closed agent.
         let new_agent_ids = self.detect_new_agents();
 
         match self.resolve_bottom_panel(focus_changed, &new_agent_ids) {
             PanelDecision::Keep => {}
-            PanelDecision::Set(tab) => {
-                self.active_bottom_panel = tab;
+            PanelDecision::Set(panel) => {
+                self.active_bottom_panel = panel;
             }
         }
 
@@ -29,10 +29,10 @@ impl AppState {
         }
     }
 
-    /// Decide what the bottom tab should do for the current focus state.
+    /// Decide what the active bottom panel should do for the current focus state.
     ///
-    /// `Keep` means "leave the current tab as-is".
-    /// `Set(tab)` means "switch to the given tab now".
+    /// `Keep` means "leave the current panel as-is".
+    /// `Set(panel)` means "select the given panel now".
     fn resolve_bottom_panel(
         &self,
         focus_changed: bool,
@@ -68,7 +68,7 @@ impl AppState {
         }
         // Remove disappeared agents from seen set so that relaunching an
         // agent is detected as new. Also clear the matching `bottom_panel_pref` so a
-        // relaunched pane starts on the default tab — explicit here because
+        // relaunched pane starts on the default panel — explicit here because
         // detect_new_agents can run before `prune_pane_states_to_current_panes`
         // (e.g. when tests mutate `repo_groups` directly without going
         // through `apply_session_snapshot`).
@@ -88,15 +88,15 @@ impl AppState {
         new_ids
     }
 
-    /// Save the current tab preference for the pane we're leaving.
+    /// Save the current active-panel preference for the pane we're leaving.
     fn save_current_bottom_panel(&mut self) {
         if let Some(prev_id) = self.focus_state.prev_focused_pane_id.clone() {
-            let tab = self.active_bottom_panel.clone();
-            self.pane_state_mut(&prev_id).bottom_panel_pref = Some(tab);
+            let panel = self.active_bottom_panel.clone();
+            self.pane_state_mut(&prev_id).bottom_panel_pref = Some(panel);
         }
     }
 
-    /// Restore the saved tab for the pane we're entering,
+    /// Restore the saved active panel for the pane we're entering,
     /// or pick a sensible default.
     fn resolve_panel_for_focused_pane(
         &self,
@@ -371,10 +371,10 @@ mod tests {
         );
     }
 
-    // ─── scenario: per-pane tab memory ──────────────────────────
+    // ─── scenario: per-pane panel memory ────────────────────────
 
     #[test]
-    fn scenario_per_pane_tab_memory() {
+    fn scenario_per_pane_panel_memory() {
         let mut state = state_with_groups(vec![agent_group("%1")], Some("%1"));
 
         // Agent %1 → Activity
@@ -415,10 +415,10 @@ mod tests {
         );
     }
 
-    // ─── scenario: manual tab preserved across refreshes ────────
+    // ─── scenario: manual panel preserved across refreshes ──────
 
     #[test]
-    fn scenario_manual_tab_preserved_across_refreshes() {
+    fn scenario_manual_panel_preserved_across_refreshes() {
         let mut state = state_with_groups(vec![agent_group("%1")], Some("%1"));
 
         state.auto_select_bottom_panel();
@@ -458,7 +458,7 @@ mod tests {
     }
 
     #[test]
-    fn scenario_new_agent_elsewhere_does_not_override_existing_tab() {
+    fn scenario_new_agent_elsewhere_does_not_override_existing_panel() {
         let mut state = state_with_groups(vec![agent_group("%1")], Some("%5"));
         state.auto_select_bottom_panel();
         assert_eq!(state.active_bottom_panel, BottomPanel::Git);
@@ -475,7 +475,7 @@ mod tests {
         assert_eq!(
             state.active_bottom_panel,
             BottomPanel::Activity,
-            "new agent elsewhere should not force a tab change"
+            "new agent elsewhere should not force a panel change"
         );
     }
 
@@ -512,16 +512,16 @@ mod tests {
         // Focus becomes None (all panes closed?)
         state.focus_state.focused_pane_id = None;
         state.auto_select_bottom_panel();
-        // restore_or_default_tab returns early for None, so tab stays
+        // Panel resolution returns early for None, so the selection stays
         assert_eq!(
             state.active_bottom_panel,
             BottomPanel::Activity,
-            "None focus → tab unchanged"
+            "None focus → panel unchanged"
         );
     }
 
     #[test]
-    fn scenario_focus_none_then_returns_to_same_pane_preserves_tab() {
+    fn scenario_focus_none_then_returns_to_same_pane_preserves_panel() {
         let mut state = state_with_groups(vec![agent_group("%1")], Some("%1"));
 
         state.auto_select_bottom_panel();
@@ -539,12 +539,12 @@ mod tests {
         assert_eq!(
             state.active_bottom_panel,
             BottomPanel::Git,
-            "returning to the same pane after None should preserve the tab"
+            "returning to the same pane after None should preserve the panel"
         );
     }
 
     #[test]
-    fn scenario_restore_saved_tab_when_returning_to_pane() {
+    fn scenario_restore_saved_panel_when_returning_to_pane() {
         let mut state = state_with_groups(vec![agent_group("%1")], Some("%1"));
 
         state.auto_select_bottom_panel();
@@ -564,7 +564,7 @@ mod tests {
         assert_eq!(
             state.active_bottom_panel,
             BottomPanel::Git,
-            "saved tab should be restored when focus returns"
+            "saved panel should be restored when focus returns"
         );
     }
 

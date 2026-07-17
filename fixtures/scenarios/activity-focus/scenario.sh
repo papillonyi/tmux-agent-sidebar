@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Single-frame snapshot cropped to the Activity tab at the bottom.
+# Single-frame snapshot cropped to the stacked bottom panels with Activity active.
 #
 # Usage:  scenario.sh <output-dir> [extra capture args...]
 

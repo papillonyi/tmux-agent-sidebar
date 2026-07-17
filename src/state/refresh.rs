@@ -360,7 +360,7 @@ impl AppState {
             return;
         }
         // Task-reset markers are internal bookkeeping for parse_task_progress;
-        // they should never appear in the user-facing Activity tab.
+        // they should never appear in the user-facing Activity panel.
         let mut entries = activity::read_activity_log(pane_id, self.activity.max_entries);
         entries.retain(|e| e.tool != activity::TASK_RESET_MARKER);
         self.activity.entries = entries;

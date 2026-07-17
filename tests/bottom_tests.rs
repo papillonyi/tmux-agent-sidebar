@@ -6,7 +6,7 @@ use tmux_agent_sidebar::activity::ActivityEntry;
 use tmux_agent_sidebar::state::{BottomPanel, Focus};
 use tmux_agent_sidebar::tmux::{AgentType, PaneStatus, SessionInfo, WindowInfo};
 
-// ─── Bottom Tab Tests ──────────────────────────────────────────────
+// ─── Bottom Panel Tests ────────────────────────────────────────────
 
 #[test]
 fn test_next_bottom_panel() {
@@ -59,13 +59,13 @@ fn test_scroll_bottom_dispatches() {
     state.scrolls.git.total_lines = 3;
     state.scrolls.git.visible_height = 1;
 
-    // Activity tab: scroll should affect activity
+    // Activity panel: scroll should affect activity
     state.active_bottom_panel = BottomPanel::Activity;
     state.scroll_bottom(1);
     assert_eq!(state.activity.scroll.offset, 1);
     assert_eq!(state.scrolls.git.offset, 0);
 
-    // Git tab: scroll should affect git
+    // Git panel: scroll should affect git
     state.active_bottom_panel = BottomPanel::Git;
     state.scroll_bottom(1);
     assert_eq!(state.scrolls.git.offset, 1);
@@ -73,7 +73,7 @@ fn test_scroll_bottom_dispatches() {
 }
 
 #[test]
-fn snapshot_git_status_tab_ui() {
+fn snapshot_git_panel_ui() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Running);
     let mut state = make_state(vec![SessionInfo {
         session_name: "main".into(),
@@ -167,7 +167,7 @@ fn snapshot_git_clean_ui() {
 }
 
 #[test]
-fn snapshot_activity_tab_active_ui() {
+fn snapshot_activity_panel_active_ui() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Running);
     let mut state = make_state(vec![SessionInfo {
         session_name: "main".into(),
@@ -207,7 +207,7 @@ fn snapshot_activity_tab_active_ui() {
 }
 
 #[test]
-fn activity_tab_leaves_one_blank_row_above_entries() {
+fn activity_panel_renders_entry_details() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Running);
     let mut state = make_state(vec![SessionInfo {
         session_name: "main".into(),
@@ -231,9 +231,7 @@ fn activity_tab_leaves_one_blank_row_above_entries() {
         label: "src/main.rs".into(),
     }];
 
-    // The inline snapshot locks in the blank-row spacer: after the `╭ Activity │ Git ╮`
-    // title row, the first row must be empty and the timestamp/tool row must appear
-    // one row further down.
+    // The inline snapshot locks in the Activity card title and entry layout.
     insta::assert_snapshot!(render_to_string(&mut state, 28, 24), @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                        — ▾
@@ -291,7 +289,7 @@ fn snapshot_activity_long_tool_keeps_one_space_gap() {
 }
 
 #[test]
-fn snapshot_tab_bar_renders_both_labels() {
+fn snapshot_stacked_panels_render_both_labels() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
     let mut state = make_state(vec![SessionInfo {
         session_name: "main".into(),

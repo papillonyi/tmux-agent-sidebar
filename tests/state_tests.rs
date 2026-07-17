@@ -486,10 +486,10 @@ fn test_scroll_activity_empty_is_noop() {
     );
 }
 
-// ─── State: git tab active flag Tests ───────────────────────────────
+// ─── State: active bottom panel Tests ───────────────────────────────
 
 #[test]
-fn test_git_tab_active_after_tab_switch() {
+fn test_git_panel_active_after_panel_switch() {
     let mut state = make_state(vec![]);
     assert_eq!(state.active_bottom_panel, BottomPanel::Activity);
 

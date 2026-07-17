@@ -102,7 +102,7 @@ fn capture_window_html(opts: &Opts) -> Result<String, String> {
 
     // Optional crop: --crop-rows START:END and/or --crop-cols START:END
     // (END is exclusive) trim the grid before rendering so scenarios
-    // can emit just the Activity/Git tab region, just a popup, etc.
+    // can emit just the stacked Activity/Git region, just a popup, etc.
     if let Some((r0, r1)) = opts.crop_rows {
         let r0 = (r0 as usize).min(grid.len());
         let r1 = (r1 as usize).min(grid.len()).max(r0);

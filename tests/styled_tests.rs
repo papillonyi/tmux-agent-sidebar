@@ -144,7 +144,7 @@ fn active_bottom_panel_activity_uses_accent_when_selected() {
     state.active_bottom_panel = BottomPanel::Activity;
 
     // Styled snapshot locks in `A` using accent (fg:153) and `G` remaining
-    // muted (fg:252) on the bottom-panel tab title row.
+    // muted (fg:252) on the inactive bottom-panel title row.
     insta::assert_snapshot!(render_to_styled_string(&mut state, 28, 14), @"
      ≡[fg:111]1[fg:255]  ●[fg:245]1[fg:255]  ◎[fg:245]0[fg:245]  ◐[fg:245]0[fg:245]  ○[fg:245]0[fg:245]  ✕[fg:245]0[fg:245]
 
@@ -183,7 +183,7 @@ fn active_bottom_panel_git_uses_accent_when_selected() {
     state.active_bottom_panel = BottomPanel::Git;
 
     // Styled snapshot locks in `G` using accent (fg:153) and `A` remaining
-    // muted (fg:252) on the bottom-panel tab title row.
+    // muted (fg:252) on the inactive bottom-panel title row.
     insta::assert_snapshot!(render_to_styled_string(&mut state, 28, 14), @"
      ≡[fg:111]1[fg:255]  ●[fg:245]1[fg:255]  ◎[fg:245]0[fg:245]  ◐[fg:245]0[fg:245]  ○[fg:245]0[fg:245]  ✕[fg:245]0[fg:245]
 

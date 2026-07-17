@@ -1,6 +1,6 @@
 ---
 title: Activity log
-description: Tool-call history rendered in the bottom panel's Activity tab.
+description: Tool-call history rendered in the lower Activity panel.
 ---
 
 import { Image } from 'astro:assets';
@@ -8,7 +8,8 @@ import activity from '../../../assets/captures/activity-focus.png';
 
 <Image src={activity} alt="activity panel screenshot" densities={[1.5, 2]} />
 
-The bottom panel's **Activity** tab shows tool-call history for the selected agent pane, written by the agent's `PostToolUse` hook.
+The lower **Activity** panel shows tool-call history for the selected agent pane,
+written by the agent's `PostToolUse` hook. It remains visible below Git.
 
 ## What is recorded
 
@@ -47,6 +48,8 @@ Tool names map to a stable color so `Read` / `Edit` / `Bash` etc. stay distingui
 | Codex       | `Bash` only — Codex's `PostToolUse` fires for Bash alone (its `tool_input` is typed `{ command: string }`), so `Read` / `Edit` / `Write` / `Grep` / `Glob` and other tool calls are **not** reported |
 | OpenCode    | Every tool event the plugin bridge emits             |
 
-## Switching tabs
+## Selecting a panel
 
-The bottom panel has two tabs — Activity and Git. Swap with `Shift+Tab`, or click the tab label with the mouse.
+Git and Activity are both visible at the same time. `Shift+Tab` changes which
+panel receives scrolling input, and clicking either panel title selects it
+directly.

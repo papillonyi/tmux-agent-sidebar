@@ -15,7 +15,7 @@ EXTRA_ARGS=("$@")
 source "$(cd "$(dirname "$0")/../common" && pwd)/_lib.sh"
 
 export FOCUS=PANE_WAITING
-# Hide the bottom tab so the crop region is all agent-list rows.
+# Hide both bottom panels so the crop region is all agent-list rows.
 export BOTTOM_HEIGHT=0
 # Crop to the sidebar: cols 0..46 (sidebar width), rows 0..26 cover
 # the filter bar + repo header + all four agent rows.
