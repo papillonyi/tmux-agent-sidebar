@@ -1,22 +1,22 @@
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
 use crate::git::{self, GitData};
 use crate::session;
-use crate::state::{AppState, BottomPanel};
+use crate::state::AppState;
 use crate::tmux;
 use crate::version::{self, UpdateNotice};
 
-/// Channels and shared flags produced by [`spawn`] that the main event loop
-/// drains every tick.
+/// Channels produced by [`spawn`] that the main event loop drains every tick.
 pub(super) struct Workers {
     pub git_rx: Receiver<GitData>,
     pub session_rx: Receiver<HashMap<String, String>>,
     pub version_rx: Receiver<UpdateNotice>,
-    pub git_tab_active: Arc<AtomicBool>,
+}
+
+fn git_polling_enabled(bottom_panel_height: u16) -> bool {
+    bottom_panel_height > 0
 }
 
 /// Spawn the background threads (git polling, session-name polling, version
@@ -25,14 +25,12 @@ pub(super) fn spawn(state: &AppState) -> Workers {
     let (git_tx, git_rx) = mpsc::channel::<GitData>();
     let (session_tx, session_rx) = mpsc::channel::<HashMap<String, String>>();
     let (version_tx, version_rx) = mpsc::channel::<UpdateNotice>();
-    let tmux_pane_clone = state.tmux_pane.clone();
-    let git_tab_active = Arc::new(AtomicBool::new(
-        state.active_bottom_panel == BottomPanel::Git,
-    ));
-    let git_tab_flag = Arc::clone(&git_tab_active);
-    std::thread::spawn(move || {
-        git_poll_loop(&tmux_pane_clone, &git_tx, &git_tab_flag);
-    });
+    if git_polling_enabled(state.bottom_panel_height) {
+        let tmux_pane = state.tmux_pane.clone();
+        std::thread::spawn(move || {
+            git_poll_loop(&tmux_pane, &git_tx);
+        });
+    }
     std::thread::spawn(move || {
         session_poll_loop(&session_tx);
     });
@@ -46,7 +44,6 @@ pub(super) fn spawn(state: &AppState) -> Workers {
         git_rx,
         session_rx,
         version_rx,
-        git_tab_active,
     }
 }
 
@@ -63,20 +60,16 @@ pub(super) fn session_poll_loop(tx: &mpsc::Sender<HashMap<String, String>>) {
     }
 }
 
-/// Git data polling thread. Fetches git status every 2 seconds while the Git
-/// tab is active. Skips fetching when the tab is not visible. PR numbers go
-/// through an in-memory `(path, branch)`-keyed cache so `gh pr view` (the only
-/// hop that costs GitHub API quota) runs at most once per `PR_CACHE_TTL`
-/// instead of every tick.
-pub(super) fn git_poll_loop(tmux_pane: &str, git_tx: &mpsc::Sender<GitData>, active: &AtomicBool) {
+/// Git data polling thread. Fetches git status every 2 seconds while the
+/// bottom panels are visible. PR numbers go through an in-memory
+/// `(path, branch)`-keyed cache so `gh pr view` (the only hop that costs
+/// GitHub API quota) runs at most once per `PR_CACHE_TTL` instead of every
+/// tick.
+pub(super) fn git_poll_loop(tmux_pane: &str, git_tx: &mpsc::Sender<GitData>) {
     let mut last_path: Option<String> = None;
     let mut pr_cache = git::PrCache::new();
     loop {
         std::thread::sleep(Duration::from_secs(2));
-
-        if !active.load(Ordering::Relaxed) {
-            continue;
-        }
 
         // When the sidebar has focus, focused_pane_path returns None.
         // Reuse the last known path so git data keeps updating.
@@ -103,81 +96,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_git_poll_skips_when_inactive() {
-        let active = Arc::new(AtomicBool::new(false));
-        let (tx, rx) = mpsc::channel::<GitData>();
-
-        let flag = Arc::clone(&active);
-        let handle = std::thread::spawn(move || {
-            // Simulate the poll loop check without actually sleeping 2s
-            for _ in 0..3 {
-                if !flag.load(Ordering::Relaxed) {
-                    continue;
-                }
-                let _ = tx.send(GitData::default());
-            }
-        });
-
-        handle.join().unwrap();
-        // No data should have been sent since active=false
-        assert!(
-            rx.try_recv().is_err(),
-            "should not poll when git tab is inactive"
-        );
+    fn git_polling_is_enabled_when_bottom_panels_are_visible() {
+        assert!(git_polling_enabled(1));
+        assert!(git_polling_enabled(20));
     }
 
     #[test]
-    fn test_git_poll_sends_when_active() {
-        let active = Arc::new(AtomicBool::new(true));
-        let (tx, rx) = mpsc::channel::<GitData>();
-
-        let flag = Arc::clone(&active);
-        let handle = std::thread::spawn(move || {
-            // active=true, so it should send
-            if flag.load(Ordering::Relaxed) {
-                let _ = tx.send(GitData::default());
-            }
-        });
-
-        handle.join().unwrap();
-        assert!(rx.try_recv().is_ok(), "should poll when git tab is active");
-    }
-
-    #[test]
-    fn test_git_poll_reacts_to_flag_change() {
-        let active = Arc::new(AtomicBool::new(false));
-        let (tx, rx) = mpsc::channel::<GitData>();
-
-        // Initially inactive
-        assert!(!active.load(Ordering::Relaxed));
-
-        // Switch to active
-        active.store(true, Ordering::Relaxed);
-
-        let flag = Arc::clone(&active);
-        let handle = std::thread::spawn(move || {
-            if flag.load(Ordering::Relaxed) {
-                let _ = tx.send(GitData::default());
-            }
-        });
-
-        handle.join().unwrap();
-        assert!(
-            rx.try_recv().is_ok(),
-            "should poll after flag switches to active"
-        );
+    fn git_polling_is_disabled_when_bottom_panels_are_hidden() {
+        assert!(!git_polling_enabled(0));
     }
 
     #[test]
     fn test_git_poll_stops_on_sender_closed() {
-        let active = AtomicBool::new(true);
         let (tx, rx) = mpsc::channel::<GitData>();
         drop(rx); // Close receiver
 
         let result = tx.send(GitData::default());
         assert!(result.is_err(), "send should fail when receiver is dropped");
-
-        // Verify the flag check pattern used in git_poll_loop
-        assert!(active.load(Ordering::Relaxed));
     }
 }

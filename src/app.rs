@@ -11,7 +11,6 @@ use crossterm::event::{self};
 use ratatui::{Terminal, backend::CrosstermBackend};
 
 use crate::SPINNER_PULSE;
-use crate::state::BottomPanel;
 
 mod input;
 mod render;
@@ -38,7 +37,6 @@ pub fn run(
         git_rx,
         session_rx,
         version_rx,
-        git_tab_active,
     } = workers;
 
     let mut last_refresh = std::time::Instant::now();
@@ -65,7 +63,7 @@ pub fn run(
         if event::poll(timeout)? {
             loop {
                 let ev = event::read()?;
-                if input::handle_event(ev, &mut state, &git_tab_active, terminal) {
+                if input::handle_event(ev, &mut state, terminal) {
                     needs_redraw = true;
                 }
                 if !event::poll(Duration::ZERO)? {
@@ -101,10 +99,6 @@ pub fn run(
             } else {
                 window_inactive_count = window_inactive_count.saturating_add(1);
             }
-            git_tab_active.store(
-                state.active_bottom_panel == BottomPanel::Git,
-                Ordering::Relaxed,
-            );
             last_refresh = std::time::Instant::now();
         }
 
