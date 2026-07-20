@@ -1,4 +1,4 @@
-use super::{AppState, RepoFilter, StatusFilter};
+use super::{AppState, PaneLocation, RepoFilter, StatusFilter};
 
 #[derive(Debug, Clone)]
 pub struct RowTarget {
@@ -68,6 +68,48 @@ pub(super) fn point_in_rect(row: u16, col: u16, rect: ratatui::layout::Rect) -> 
 }
 
 impl AppState {
+    pub(crate) fn pane_is_in_current_window(&self, pane_id: &str) -> bool {
+        self.current_window_id.is_empty()
+            || self
+                .pane_locations
+                .get(pane_id)
+                .map(|location| location.window_id == self.current_window_id)
+                .unwrap_or(true)
+    }
+
+    pub(crate) fn visible_other_window_locations(&self) -> Vec<PaneLocation> {
+        let mut locations = Vec::new();
+        for group in &self.repo_groups {
+            if !self.global.repo_filter.matches_group(&group.name) {
+                continue;
+            }
+            for (pane, _) in &group.panes {
+                if !self.global.status_filter.matches(&pane.status)
+                    || self.pane_is_in_current_window(&pane.pane_id)
+                {
+                    continue;
+                }
+                if let Some(location) = self.pane_locations.get(&pane.pane_id)
+                    && !locations.contains(location)
+                {
+                    locations.push(location.clone());
+                }
+            }
+        }
+        locations.sort_by(|a, b| {
+            a.session_name
+                .to_lowercase()
+                .cmp(&b.session_name.to_lowercase())
+                .then_with(|| {
+                    a.window_name
+                        .to_lowercase()
+                        .cmp(&b.window_name.to_lowercase())
+                })
+                .then_with(|| a.window_id.cmp(&b.window_id))
+        });
+        locations
+    }
+
     pub fn rebuild_row_targets(&mut self) {
         // Reset stale repo filter if the repo no longer exists, and
         // persist the reset back to tmux so fresh sidebar instances do
@@ -79,19 +121,43 @@ impl AppState {
             self.global.save_repo_filter();
         }
 
-        self.layout.pane_row_targets.clear();
+        let mut pane_ids = Vec::new();
+
+        // Current-window agents always lead the keyboard/mouse navigation
+        // order, matching their top-anchored visual section.
         for group in &self.repo_groups {
             if !self.global.repo_filter.matches_group(&group.name) {
                 continue;
             }
             for (pane, _) in &group.panes {
-                if self.global.status_filter.matches(&pane.status) {
-                    self.layout.pane_row_targets.push(RowTarget {
-                        pane_id: pane.pane_id.clone(),
-                    });
+                if self.global.status_filter.matches(&pane.status)
+                    && self.pane_is_in_current_window(&pane.pane_id)
+                {
+                    pane_ids.push(pane.pane_id.clone());
                 }
             }
         }
+
+        // Other windows are ordered by tmux session/window, then retain the
+        // existing alphabetical repo order inside each window section.
+        for location in self.visible_other_window_locations() {
+            for group in &self.repo_groups {
+                if !self.global.repo_filter.matches_group(&group.name) {
+                    continue;
+                }
+                for (pane, _) in &group.panes {
+                    if self.global.status_filter.matches(&pane.status)
+                        && self.pane_locations.get(&pane.pane_id) == Some(&location)
+                    {
+                        pane_ids.push(pane.pane_id.clone());
+                    }
+                }
+            }
+        }
+        self.layout.pane_row_targets = pane_ids
+            .into_iter()
+            .map(|pane_id| RowTarget { pane_id })
+            .collect();
         if self.global.selected_pane_row >= self.layout.pane_row_targets.len()
             && !self.layout.pane_row_targets.is_empty()
         {

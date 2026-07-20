@@ -6,7 +6,7 @@ use crate::cli::sanitize_tmux_value;
 use crate::process::ProcessSnapshot;
 use crate::tmux::{self, PaneStatus, SessionInfo};
 
-use super::AppState;
+use super::{AppState, PaneLocation};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TaskProgressDecision {
@@ -57,6 +57,23 @@ impl AppState {
         sessions: Vec<SessionInfo>,
     ) {
         self.focus_state.sidebar_focused = sidebar_focused;
+        self.pane_locations = sessions
+            .iter()
+            .flat_map(|session| {
+                session.windows.iter().flat_map(move |window| {
+                    window.panes.iter().map(move |pane| {
+                        (
+                            pane.pane_id.clone(),
+                            PaneLocation {
+                                session_name: session.session_name.clone(),
+                                window_id: window.window_id.clone(),
+                                window_name: window.window_name.clone(),
+                            },
+                        )
+                    })
+                })
+            })
+            .collect();
         // Capture the prior `pane_id → session_id` map so we can detect
         // anything that should re-trigger `refresh_session_names`:
         //   - a brand-new pane_id (first appearance)
@@ -146,7 +163,9 @@ impl AppState {
     /// Returns whether the sidebar's window is the active tmux window.
     pub fn refresh(&mut self) -> bool {
         self.refresh_now();
-        let (focused, window_active, _, _) = tmux::get_sidebar_pane_info(&self.tmux_pane);
+        let (focused, window_active, _, _, current_window_id) =
+            tmux::get_sidebar_pane_info(&self.tmux_pane);
+        self.current_window_id = current_window_id;
         let (mut sessions, mut process_snapshot) = tmux::query_sessions_with_process_snapshot();
         self.sweep_dead_bg_shells_if_due(&mut sessions, &mut process_snapshot);
         if let Some(process_snapshot) = self.refresh_port_data(&sessions, process_snapshot.as_ref())

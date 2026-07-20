@@ -42,6 +42,22 @@ pub fn buffer_to_string(buf: &Buffer) -> String {
     lines.join("\n")
 }
 
+/// Convert the full frame to text while preserving empty rows. This is used
+/// by layout snapshots where vertical anchoring is part of the behavior.
+pub fn buffer_to_full_string(buf: &Buffer) -> String {
+    let area = buf.area;
+    (area.y..area.y + area.height)
+        .map(|y| {
+            let mut line = String::new();
+            for x in area.x..area.x + area.width {
+                line.push_str(buf[(x, y)].symbol());
+            }
+            line.trim_end().to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Convert buffer to string WITH style annotations for color/modifier verification
 /// Format: each cell's symbol is followed by style info if non-default
 /// e.g., "○[fg:250]" or " [rev]" or "c[fg:174,bold]"
@@ -91,6 +107,14 @@ pub fn render_to_string(state: &mut AppState, width: u16, height: u16) -> String
     terminal.draw(|frame| ui::draw(frame, state)).unwrap();
     let buf = terminal.backend().buffer().clone();
     buffer_to_string(&buf)
+}
+
+pub fn render_to_full_string(state: &mut AppState, width: u16, height: u16) -> String {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| ui::draw(frame, state)).unwrap();
+    let buf = terminal.backend().buffer().clone();
+    buffer_to_full_string(&buf)
 }
 
 pub fn render_to_styled_string(state: &mut AppState, width: u16, height: u16) -> String {

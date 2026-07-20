@@ -4,7 +4,7 @@ mod test_helpers;
 use test_helpers::*;
 use tmux_agent_sidebar::activity::{ActivityEntry, TaskProgress, TaskStatus};
 use tmux_agent_sidebar::group::{PaneGitInfo, RepoGroup};
-use tmux_agent_sidebar::state::{Focus, PopupState, RepoFilter, StatusFilter};
+use tmux_agent_sidebar::state::{Focus, PaneLocation, PopupState, RepoFilter, StatusFilter};
 use tmux_agent_sidebar::tmux::{
     AgentType, PaneInfo, PaneStatus, PermissionMode, SessionInfo, SubagentInfo, WindowInfo,
     WorktreeMetadata,
@@ -34,6 +34,78 @@ fn snapshot_single_agent_idle_ui() {
     ⓘ                        — ▾
     ┃ ○ claude
         Waiting for prompt…
+    ╭ Git ─────────────────────╮
+    │    Working tree clean    │
+    ╰──────────────────────────╯
+    ╭ Activity ────────────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_current_window_agents_top_other_windows_above_git() {
+    let mut current = make_pane(AgentType::Claude, PaneStatus::Running);
+    current.pane_id = "%1".into();
+    let mut other_window = make_pane(AgentType::Codex, PaneStatus::Running);
+    other_window.pane_id = "%2".into();
+    let mut other_session = make_pane(AgentType::OpenCode, PaneStatus::Running);
+    other_session.pane_id = "%3".into();
+
+    let mut state = make_state(vec![]);
+    state.bottom_panel_height = 6;
+    state.current_window_id = "@1".into();
+    state.repo_groups = vec![
+        make_repo_group("current-repo", vec![current]),
+        make_repo_group("other-repo", vec![other_window]),
+        make_repo_group("remote-repo", vec![other_session]),
+    ];
+    state.pane_locations.insert(
+        "%1".into(),
+        PaneLocation {
+            session_name: "main".into(),
+            window_id: "@1".into(),
+            window_name: "editor".into(),
+        },
+    );
+    state.pane_locations.insert(
+        "%2".into(),
+        PaneLocation {
+            session_name: "main".into(),
+            window_id: "@2".into(),
+            window_name: "api".into(),
+        },
+    );
+    state.pane_locations.insert(
+        "%3".into(),
+        PaneLocation {
+            session_name: "remote".into(),
+            window_id: "@3".into(),
+            window_name: "ops".into(),
+        },
+    );
+    state.rebuild_row_targets();
+
+    let output = render_to_full_string(&mut state, 28, 24);
+    insta::assert_snapshot!(output, @"
+     ≡3  ●3  ◎0  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    current-repo
+    ┃ ● claude
+
+
+
+
+
+
+    ↳ main:api
+    other-repo
+      ● codex
+
+    ↳ remote:ops
+    remote-repo
+      ● opencode
+
     ╭ Git ─────────────────────╮
     │    Working tree clean    │
     ╰──────────────────────────╯

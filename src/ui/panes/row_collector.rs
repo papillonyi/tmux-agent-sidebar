@@ -6,7 +6,8 @@ use ratatui::{
 use super::SPAWN_BUTTON;
 use super::row;
 use crate::state::{AppState, Focus};
-use crate::ui::text::display_width;
+use crate::tmux::PaneInfo;
+use crate::ui::text::{display_width, truncate_to_width};
 
 #[derive(Debug, Default)]
 pub(super) struct CollectedRows {
@@ -16,14 +17,37 @@ pub(super) struct CollectedRows {
     pub pending_remove: Vec<(usize, u16, String)>,
 }
 
-pub(super) fn collect(state: &AppState, width: u16) -> CollectedRows {
-    let width = width as usize;
-    let theme = &state.theme;
+impl CollectedRows {
+    fn push_blank(&mut self) {
+        self.lines.push(Line::from(""));
+        self.line_to_row.push(None);
+    }
 
-    let mut collected = CollectedRows::default();
+    fn append(&mut self, mut other: Self) {
+        let line_offset = self.lines.len();
+        for (line, _, _) in &mut other.pending_spawn {
+            *line += line_offset;
+        }
+        for (line, _, _) in &mut other.pending_remove {
+            *line += line_offset;
+        }
+        self.lines.append(&mut other.lines);
+        self.line_to_row.append(&mut other.line_to_row);
+        self.pending_spawn.append(&mut other.pending_spawn);
+        self.pending_remove.append(&mut other.pending_remove);
+    }
+}
+
+fn collect_repo_groups(
+    state: &AppState,
+    width: usize,
+    collected: &mut CollectedRows,
+    row_index: &mut usize,
+    pane_matches: impl Fn(&PaneInfo) -> bool,
+) {
+    let theme = &state.theme;
     let filter = state.global.status_filter;
     let mut first_group = true;
-    let mut row_index: usize = 0;
 
     for group in &state.repo_groups {
         if !state.global.repo_filter.matches_group(&group.name) {
@@ -32,7 +56,7 @@ pub(super) fn collect(state: &AppState, width: u16) -> CollectedRows {
         let filtered_panes: Vec<_> = group
             .panes
             .iter()
-            .filter(|(pane, _)| filter.matches(&pane.status))
+            .filter(|(pane, _)| filter.matches(&pane.status) && pane_matches(pane))
             .collect();
         if filtered_panes.is_empty() {
             continue;
@@ -41,8 +65,7 @@ pub(super) fn collect(state: &AppState, width: u16) -> CollectedRows {
         if !first_group {
             // Separate repo groups, but do not add a leading blank before
             // the first repo so the list starts immediately below the header.
-            collected.lines.push(Line::from(""));
-            collected.line_to_row.push(None);
+            collected.push_blank();
         }
         first_group = false;
 
@@ -50,7 +73,7 @@ pub(super) fn collect(state: &AppState, width: u16) -> CollectedRows {
             .focus_state
             .focused_pane_id
             .as_ref()
-            .is_some_and(|fid| group.panes.iter().any(|(p, _)| p.pane_id == *fid));
+            .is_some_and(|fid| filtered_panes.iter().any(|(p, _)| p.pane_id == *fid));
 
         // Plain repo header at column 0, with a `[+]` spawn button
         // right-aligned on the same row. Only rendered when the group
@@ -62,8 +85,7 @@ pub(super) fn collect(state: &AppState, width: u16) -> CollectedRows {
         } else {
             theme.text_active
         };
-        let repo_root = group
-            .panes
+        let repo_root = filtered_panes
             .iter()
             .find_map(|(_, git)| git.repo_root.clone());
         let spans: Vec<Span<'static>> = if let Some(ref root) = repo_root {
@@ -96,7 +118,7 @@ pub(super) fn collect(state: &AppState, width: u16) -> CollectedRows {
         for (pane, git_info) in filtered_panes.iter() {
             let is_selected = state.focus_state.sidebar_focused
                 && state.focus_state.focus == Focus::Panes
-                && row_index == state.global.selected_pane_row;
+                && *row_index == state.global.selected_pane_row;
 
             let is_active = state.focus_state.focused_pane_id.as_ref() == Some(&pane.pane_id);
             let has_focus_enclosure = row::has_focus_enclosure(pane, is_active, width);
@@ -121,7 +143,7 @@ pub(super) fn collect(state: &AppState, width: u16) -> CollectedRows {
             let pane_line_count = pane_lines.len();
             collected.lines.extend(pane_lines);
             for _ in 0..pane_line_count {
-                collected.line_to_row.push(Some(row_index));
+                collected.line_to_row.push(Some(*row_index));
             }
 
             // The branch row is always `status_line_idx + 1` when
@@ -145,18 +167,66 @@ pub(super) fn collect(state: &AppState, width: u16) -> CollectedRows {
                     .push((status_line_idx + 1, x, pane.pane_id.clone()));
             }
 
-            row_index += 1;
+            *row_index += 1;
         }
     }
+}
 
-    collected
+pub(super) fn collect(state: &AppState, width: u16, visible_height: u16) -> CollectedRows {
+    let width = width as usize;
+    let mut row_index = 0;
+
+    let mut current = CollectedRows::default();
+    collect_repo_groups(state, width, &mut current, &mut row_index, |pane| {
+        state.pane_is_in_current_window(&pane.pane_id)
+    });
+
+    let mut other = CollectedRows::default();
+    for (location_index, location) in state
+        .visible_other_window_locations()
+        .into_iter()
+        .enumerate()
+    {
+        if location_index > 0 {
+            other.push_blank();
+        }
+        let label = truncate_to_width(&format!("↳ {}", location.label()), width);
+        other.lines.push(Line::from(Span::styled(
+            label,
+            Style::default().fg(state.theme.session_header),
+        )));
+        other.line_to_row.push(None);
+
+        collect_repo_groups(state, width, &mut other, &mut row_index, |pane| {
+            state.pane_locations.get(&pane.pane_id) == Some(&location)
+        });
+    }
+
+    if other.lines.is_empty() {
+        return current;
+    }
+
+    // When everything fits, expand the gap so other-window agents sit at
+    // the bottom of the pane list, immediately above the divider/Git area.
+    // Under pressure the gap collapses to one separator row and the existing
+    // list scrolling takes over.
+    let minimum_gap = usize::from(!current.lines.is_empty());
+    let flexible_gap = (visible_height as usize)
+        .saturating_sub(current.lines.len() + other.lines.len())
+        .max(minimum_gap);
+    for _ in 0..flexible_gap {
+        current.push_blank();
+    }
+    current.append(other);
+
+    current
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::group::{PaneGitInfo, RepoGroup};
-    use crate::state::{AppState, StatusFilter};
+    use crate::state::{AppState, PaneLocation, StatusFilter};
     use crate::tmux::{AgentType, PaneInfo, PaneStatus, PermissionMode, WorktreeMetadata};
 
     fn make_pane(id: &str, status: PaneStatus) -> PaneInfo {
@@ -186,7 +256,7 @@ mod tests {
     #[test]
     fn collect_empty_repo_groups_produces_no_lines() {
         let state = AppState::new("%0".into());
-        let collected = collect(&state, 40);
+        let collected = collect(&state, 40, 20);
         assert!(collected.lines.is_empty());
         assert!(collected.line_to_row.is_empty());
         assert!(collected.pending_spawn.is_empty());
@@ -203,7 +273,7 @@ mod tests {
             has_focus: false,
             panes: vec![(make_pane("%1", PaneStatus::Running), PaneGitInfo::default())],
         }];
-        let collected = collect(&state, 40);
+        let collected = collect(&state, 40, 20);
         assert!(collected.lines.is_empty());
         assert!(collected.pending_spawn.is_empty());
     }
@@ -222,7 +292,7 @@ mod tests {
             has_focus: false,
             panes: vec![(make_pane("%1", PaneStatus::Running), git_info)],
         }];
-        let collected = collect(&state, 40);
+        let collected = collect(&state, 40, 20);
         assert_eq!(
             collected.pending_spawn.len(),
             1,
@@ -242,7 +312,7 @@ mod tests {
             has_focus: false,
             panes: vec![(make_pane("%1", PaneStatus::Running), PaneGitInfo::default())],
         }];
-        let collected = collect(&state, 40);
+        let collected = collect(&state, 40, 20);
         assert!(
             collected.pending_spawn.is_empty(),
             "groups without repo_root must not produce spawn targets"
@@ -270,8 +340,65 @@ mod tests {
             with_root("/repo/b", "b", "%2"),
             with_root("/repo/c", "c", "%3"),
         ];
-        let collected = collect(&state, 40);
+        let collected = collect(&state, 40, 20);
         assert_eq!(collected.pending_spawn.len(), 3);
+    }
+
+    #[test]
+    fn other_window_spawn_target_moves_with_bottom_alignment_gap() {
+        let mut state = AppState::new("%0".into());
+        state.current_window_id = "@current".into();
+        let git_info = |root: &str| PaneGitInfo {
+            repo_root: Some(root.into()),
+            branch: None,
+            is_worktree: false,
+            worktree_name: None,
+        };
+        state.repo_groups = vec![
+            RepoGroup {
+                name: "current".into(),
+                has_focus: true,
+                panes: vec![(
+                    make_pane("%current", PaneStatus::Running),
+                    git_info("/repo/current"),
+                )],
+            },
+            RepoGroup {
+                name: "other".into(),
+                has_focus: false,
+                panes: vec![(
+                    make_pane("%other", PaneStatus::Running),
+                    git_info("/repo/other"),
+                )],
+            },
+        ];
+        state.pane_locations.insert(
+            "%current".into(),
+            PaneLocation {
+                session_name: "main".into(),
+                window_id: "@current".into(),
+                window_name: "editor".into(),
+            },
+        );
+        state.pane_locations.insert(
+            "%other".into(),
+            PaneLocation {
+                session_name: "main".into(),
+                window_id: "@other".into(),
+                window_name: "api".into(),
+            },
+        );
+        state.rebuild_row_targets();
+
+        let collected = collect(&state, 40, 10);
+
+        let spawn_lines: Vec<usize> = collected
+            .pending_spawn
+            .iter()
+            .map(|(line, _, _)| *line)
+            .collect();
+        assert_eq!(spawn_lines, vec![0, 8]);
+        assert_eq!(collected.line_to_row[9], Some(1));
     }
 
     #[test]
@@ -294,7 +421,7 @@ mod tests {
             panes: vec![(pane, git_info)],
         }];
 
-        let collected = collect(&state, 30);
+        let collected = collect(&state, 30, 20);
         assert_eq!(collected.pending_remove, vec![(2, 28, "%1".into())]);
     }
 }

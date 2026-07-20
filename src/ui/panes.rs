@@ -493,7 +493,7 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
         line_to_row,
         pending_spawn,
         pending_remove,
-    } = row_collector::collect(state, layout.list_area.width);
+    } = row_collector::collect(state, layout.list_area.width, layout.list_area.height);
     state.layout.line_to_row = line_to_row;
     let scroll_offset = compute_scroll_offset(state, lines.len(), layout.list_area);
     click_targets::materialize(

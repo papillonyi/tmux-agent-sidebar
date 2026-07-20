@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{collections::HashMap, time::Instant};
 
 use crate::ui::colors::ColorTheme;
 use crate::ui::icons::StatusIcons;
@@ -39,6 +39,30 @@ pub enum BottomPanel {
     Git,
 }
 
+/// Tmux container that owns an agent pane. Kept separately from the
+/// agent-provided `session_name`, which is the optional `/rename` label.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PaneLocation {
+    pub session_name: String,
+    pub window_id: String,
+    pub window_name: String,
+}
+
+impl PaneLocation {
+    pub fn label(&self) -> String {
+        let window = if self.window_name.is_empty() {
+            &self.window_id
+        } else {
+            &self.window_name
+        };
+        if self.session_name.is_empty() {
+            window.to_string()
+        } else {
+            format!("{}:{}", self.session_name, window)
+        }
+    }
+}
+
 pub struct AppState {
     pub now: u64,
     pub repo_groups: Vec<crate::group::RepoGroup>,
@@ -56,6 +80,13 @@ pub struct AppState {
     pub layout: FrameLayout,
     pub activity: ActivityState,
     pub tmux_pane: String,
+    /// Window containing this sidebar pane. Agent panes in this window are
+    /// rendered from the top; panes in other windows are anchored above the
+    /// bottom panel.
+    pub current_window_id: String,
+    /// Pane ID to tmux session/window ownership, rebuilt from every tmux
+    /// session snapshot before the repo-only grouping step loses that shape.
+    pub pane_locations: HashMap<String, PaneLocation>,
     /// Scroll offsets for the agents list and Git panel. Activity panel
     /// scroll lives in [`ActivityState::scroll`].
     pub scrolls: ScrollStates,
@@ -147,6 +178,8 @@ impl AppState {
             layout: FrameLayout::default(),
             activity: ActivityState::new(),
             tmux_pane,
+            current_window_id: String::new(),
+            pane_locations: HashMap::new(),
             scrolls: ScrollStates::default(),
             theme: ColorTheme::default(),
             icons: StatusIcons::default(),
@@ -255,6 +288,61 @@ mod tests {
         assert_eq!(state.layout.pane_row_targets[0].pane_id, "%1");
         assert_eq!(state.layout.pane_row_targets[1].pane_id, "%2");
         assert_eq!(state.layout.pane_row_targets[2].pane_id, "%3");
+    }
+
+    #[test]
+    fn rebuild_row_targets_puts_current_window_before_other_locations() {
+        let mut state = AppState::new("%99".into());
+        state.current_window_id = "@current".into();
+        state.repo_groups = vec![
+            RepoGroup {
+                name: "other".into(),
+                has_focus: false,
+                panes: vec![
+                    (test_pane("%remote"), PaneGitInfo::default()),
+                    (test_pane("%other"), PaneGitInfo::default()),
+                ],
+            },
+            RepoGroup {
+                name: "current".into(),
+                has_focus: true,
+                panes: vec![(test_pane("%current"), PaneGitInfo::default())],
+            },
+        ];
+        state.pane_locations.insert(
+            "%current".into(),
+            PaneLocation {
+                session_name: "main".into(),
+                window_id: "@current".into(),
+                window_name: "editor".into(),
+            },
+        );
+        state.pane_locations.insert(
+            "%other".into(),
+            PaneLocation {
+                session_name: "main".into(),
+                window_id: "@other".into(),
+                window_name: "api".into(),
+            },
+        );
+        state.pane_locations.insert(
+            "%remote".into(),
+            PaneLocation {
+                session_name: "remote".into(),
+                window_id: "@remote".into(),
+                window_name: "ops".into(),
+            },
+        );
+
+        state.rebuild_row_targets();
+
+        let pane_ids: Vec<&str> = state
+            .layout
+            .pane_row_targets
+            .iter()
+            .map(|target| target.pane_id.as_str())
+            .collect();
+        assert_eq!(pane_ids, vec!["%current", "%other", "%remote"]);
     }
 
     #[test]
@@ -944,6 +1032,14 @@ mod tests {
         assert_eq!(state.repo_groups.len(), 1);
         assert_eq!(state.layout.pane_row_targets.len(), 1);
         assert_eq!(state.global.selected_pane_row, 0);
+        assert_eq!(
+            state.pane_locations.get("%1"),
+            Some(&PaneLocation {
+                session_name: "main".into(),
+                window_id: "@0".into(),
+                window_name: "project".into(),
+            })
+        );
         // focused_pane_id is set by find_focused_pane() which queries tmux
         // directly, so we don't assert it here (tmux not available in tests).
     }

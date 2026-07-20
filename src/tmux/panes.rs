@@ -1,20 +1,21 @@
 use super::commands::{display_message, run_tmux};
 
-pub fn get_sidebar_pane_info(tmux_pane: &str) -> (bool, bool, u16, u16) {
+pub fn get_sidebar_pane_info(tmux_pane: &str) -> (bool, bool, u16, u16, String) {
     let out = display_message(
         tmux_pane,
-        "#{pane_active} #{window_active} #{pane_width} #{pane_height}",
+        "#{pane_active} #{window_active} #{pane_width} #{pane_height} #{window_id}",
     );
-    let parts: Vec<&str> = out.splitn(4, ' ').collect();
-    if parts.len() >= 4 {
+    let parts: Vec<&str> = out.splitn(5, ' ').collect();
+    if parts.len() >= 5 {
         (
             parts[0] == "1",
             parts[1] == "1",
             parts[2].parse().unwrap_or(28),
             parts[3].parse().unwrap_or(24),
+            parts[4].to_string(),
         )
     } else {
-        (false, false, 28, 24)
+        (false, false, 28, 24, String::new())
     }
 }
 
