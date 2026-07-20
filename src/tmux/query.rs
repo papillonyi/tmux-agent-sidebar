@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::process::{ProcessSnapshot, command_basename};
@@ -12,8 +12,8 @@ use super::options::{
 };
 use super::subagent::parse_subagent_info;
 use super::types::{
-    AgentType, CODEX_AGENT, PaneInfo, PaneStatus, PermissionMode, SessionInfo, WindowInfo,
-    WorktreeMetadata,
+    AgentType, CODEX_AGENT, PaneInfo, PanePosition, PaneStatus, PermissionMode, SessionInfo,
+    WindowInfo, WorktreeMetadata,
 };
 use crate::worktree::SPAWNED_OPTION;
 
@@ -26,38 +26,40 @@ mod session_line_field {
     pub const WINDOW_NAME: usize = 3;
     pub const WINDOW_ACTIVE: usize = 4;
     pub const AUTOMATIC_RENAME: usize = 5;
+    pub const PANE_TOP: usize = 6;
+    pub const PANE_LEFT: usize = 7;
     /// Index where the per-pane field suffix consumed by `parse_pane_line` begins.
-    pub const PANE_LINE_OFFSET: usize = 6;
+    pub const PANE_LINE_OFFSET: usize = 8;
     /// Minimum number of fields a valid `pane_format()` line must contain.
-    pub const MIN_FIELDS: usize = 28;
+    pub const MIN_FIELDS: usize = 30;
 }
 
 // Indices into the pane-line suffix that `parse_pane_line` operates on.
-// Each value = (absolute index in the full format string) - 6, because
-// `build_session_hierarchy` strips the leading 6 window-level fields
+// Each value = (absolute index in the full format string) - 8, because
+// `build_session_hierarchy` strips the leading 8 session/window/position fields
 // before joining the remainder back into `pane_line`.
 pub(super) mod pane_line_field {
-    pub const PANE_ACTIVE: usize = 0; // absolute 6
-    pub const PANE_STATUS: usize = 1; // absolute 7  (@pane_status)
-    pub const PANE_ATTENTION: usize = 2; // absolute 8  (@pane_attention)
-    pub const AGENT: usize = 3; // absolute 9  (@pane_agent)
-    pub const PANE_CURRENT_PATH: usize = 5; // absolute 11 (pane_current_path)
-    pub const PANE_CURRENT_COMMAND: usize = 6; // absolute 12
-    pub const PANE_ROLE: usize = 7; // absolute 13 (@pane_role)
-    pub const PANE_ID: usize = 8; // absolute 14
-    pub const PROMPT: usize = 9; // absolute 15 (@pane_prompt)
-    pub const PROMPT_SOURCE: usize = 10; // absolute 16 (@pane_prompt_source)
-    pub const STARTED_AT: usize = 11; // absolute 17 (@pane_started_at)
-    pub const WAIT_REASON: usize = 12; // absolute 18 (@pane_wait_reason)
-    pub const PANE_PID: usize = 13; // absolute 19
-    pub const SUBAGENTS: usize = 14; // absolute 20 (@pane_subagents)
-    pub const PANE_CWD: usize = 15; // absolute 21 (@pane_cwd)
-    pub const PERMISSION_MODE: usize = 16; // absolute 22 (@pane_permission_mode)
-    pub const WORKTREE_NAME: usize = 17; // absolute 23 (@pane_worktree_name)
-    pub const WORKTREE_BRANCH: usize = 18; // absolute 24 (@pane_worktree_branch)
-    pub const SESSION_ID: usize = 19; // absolute 25 (@pane_session_id)
-    pub const SIDEBAR_SPAWNED: usize = 20; // absolute 26 (@agent-sidebar-spawned)
-    pub const BG_CMD: usize = 21; // absolute 27 (@pane_bg_cmd)
+    pub const PANE_ACTIVE: usize = 0; // absolute 8
+    pub const PANE_STATUS: usize = 1; // absolute 9  (@pane_status)
+    pub const PANE_ATTENTION: usize = 2; // absolute 10 (@pane_attention)
+    pub const AGENT: usize = 3; // absolute 11 (@pane_agent)
+    pub const PANE_CURRENT_PATH: usize = 5; // absolute 13 (pane_current_path)
+    pub const PANE_CURRENT_COMMAND: usize = 6; // absolute 14
+    pub const PANE_ROLE: usize = 7; // absolute 15 (@pane_role)
+    pub const PANE_ID: usize = 8; // absolute 16
+    pub const PROMPT: usize = 9; // absolute 17 (@pane_prompt)
+    pub const PROMPT_SOURCE: usize = 10; // absolute 18 (@pane_prompt_source)
+    pub const STARTED_AT: usize = 11; // absolute 19 (@pane_started_at)
+    pub const WAIT_REASON: usize = 12; // absolute 20 (@pane_wait_reason)
+    pub const PANE_PID: usize = 13; // absolute 21
+    pub const SUBAGENTS: usize = 14; // absolute 22 (@pane_subagents)
+    pub const PANE_CWD: usize = 15; // absolute 23 (@pane_cwd)
+    pub const PERMISSION_MODE: usize = 16; // absolute 24 (@pane_permission_mode)
+    pub const WORKTREE_NAME: usize = 17; // absolute 25 (@pane_worktree_name)
+    pub const WORKTREE_BRANCH: usize = 18; // absolute 26 (@pane_worktree_branch)
+    pub const SESSION_ID: usize = 19; // absolute 27 (@pane_session_id)
+    pub const SIDEBAR_SPAWNED: usize = 20; // absolute 28 (@agent-sidebar-spawned)
+    pub const BG_CMD: usize = 21; // absolute 29 (@pane_bg_cmd)
     /// Minimum number of fields the pane-line suffix must contain.
     /// Equals `session_line_field::MIN_FIELDS - PANE_LINE_OFFSET`.
     pub const MIN_FIELDS: usize = 22;
@@ -74,6 +76,8 @@ fn pane_format() -> String {
         q("window_name"),
         q("window_active"),
         q("automatic-rename"),
+        q("pane_top"),
+        q("pane_left"),
         q("pane_active"),
         q(PANE_STATUS),
         q(PANE_ATTENTION),
@@ -117,23 +121,30 @@ pub fn query_sessions() -> Vec<SessionInfo> {
     query_sessions_with_process_snapshot().0
 }
 
-pub(crate) fn query_sessions_with_process_snapshot() -> (Vec<SessionInfo>, Option<ProcessSnapshot>)
-{
+pub(crate) fn query_sessions_with_process_snapshot() -> (
+    Vec<SessionInfo>,
+    Option<ProcessSnapshot>,
+    HashMap<String, PanePosition>,
+) {
     let pane_format = pane_format();
     let all_panes_output = match run_tmux(&["list-panes", "-a", "-F", &pane_format]) {
         Some(s) => s,
-        None => return (vec![], None),
+        None => return (vec![], None, HashMap::new()),
     };
 
     let process_snapshot = process_snapshot_for_panes(&all_panes_output);
-    let (mut sessions_map, codex_pids) =
+    let (mut sessions_map, codex_pids, pane_positions) =
         build_session_hierarchy(&all_panes_output, process_snapshot.as_ref());
     if !codex_pids.is_empty()
         && let Some(snapshot) = &process_snapshot
     {
         resolve_codex_permission_modes(&mut sessions_map, &codex_pids, snapshot);
     }
-    (finalize_sessions(sessions_map), process_snapshot)
+    (
+        finalize_sessions(sessions_map),
+        process_snapshot,
+        pane_positions,
+    )
 }
 
 /// Parse the raw `tmux list-panes` output into an indexed session→window→pane
@@ -142,9 +153,14 @@ pub(crate) fn query_sessions_with_process_snapshot() -> (Vec<SessionInfo>, Optio
 fn build_session_hierarchy(
     all_panes_output: &str,
     process_snapshot: Option<&ProcessSnapshot>,
-) -> (SessionMap, Vec<CodexPidEntry>) {
+) -> (
+    SessionMap,
+    Vec<CodexPidEntry>,
+    HashMap<String, PanePosition>,
+) {
     let mut sessions_map: SessionMap = indexmap::IndexMap::new();
     let mut codex_pids: Vec<CodexPidEntry> = Vec::new();
+    let mut pane_positions = HashMap::new();
     let mut seen_pids: HashSet<u32> = HashSet::new();
 
     for line in all_panes_output.lines() {
@@ -185,6 +201,17 @@ fn build_session_hierarchy(
             });
 
         if let Some(pane) = parse_pane_fields_with_processes(pane_fields, process_snapshot) {
+            pane_positions.insert(
+                pane.pane_id.clone(),
+                PanePosition {
+                    top: parts[session_line_field::PANE_TOP]
+                        .parse()
+                        .unwrap_or(u16::MAX),
+                    left: parts[session_line_field::PANE_LEFT]
+                        .parse()
+                        .unwrap_or(u16::MAX),
+                },
+            );
             if pane.agent == AgentType::Codex
                 && let Some(pid) = pane.pane_pid
             {
@@ -194,7 +221,7 @@ fn build_session_hierarchy(
         }
     }
 
-    (sessions_map, codex_pids)
+    (sessions_map, codex_pids, pane_positions)
 }
 
 /// Fan out Codex permission mode updates to every Codex pane across every
@@ -1255,26 +1282,28 @@ mod tests {
     fn make_full_pane_line(session_name: &str, pane_pid: u32) -> String {
         // Field layout (pane_format):
         // 0:session_name|1:window_id|2:window_index|3:window_name|
-        // 4:window_active|5:automatic-rename|6:pane_active|7:@pane_status|
-        // 8:@pane_attention|9:@pane_agent|10:@pane_name|
-        // 11:pane_current_path|12:pane_current_command|13:@pane_role|
-        // 14:pane_id|15:@pane_prompt|16:@pane_prompt_source|
-        // 17:@pane_started_at|18:@pane_wait_reason|19:pane_pid|
-        // 20:@pane_subagents|21:@pane_cwd|22:@pane_permission_mode|
-        // 23:@pane_worktree_name|24:@pane_worktree_branch|
-        // 25:@pane_session_id|26:@agent-sidebar-spawned|27:@pane_bg_cmd
-        // 28 total fields (MIN_FIELDS = 28)
-        let mut fields: Vec<&str> = vec![""; 28];
+        // 4:window_active|5:automatic-rename|6:pane_top|7:pane_left|
+        // 8:pane_active|9:@pane_status|10:@pane_attention|11:@pane_agent|
+        // 12:@pane_name|13:pane_current_path|14:pane_current_command|
+        // 15:@pane_role|16:pane_id|17:@pane_prompt|18:@pane_prompt_source|
+        // 19:@pane_started_at|20:@pane_wait_reason|21:pane_pid|
+        // 22:@pane_subagents|23:@pane_cwd|24:@pane_permission_mode|
+        // 25:@pane_worktree_name|26:@pane_worktree_branch|
+        // 27:@pane_session_id|28:@agent-sidebar-spawned|29:@pane_bg_cmd
+        // 30 total fields (MIN_FIELDS = 30)
+        let mut fields: Vec<&str> = vec![""; 30];
         fields[0] = session_name;
         fields[1] = "@0"; // window_id
         fields[3] = "win"; // window_name
         fields[4] = "1"; // window_active
-        fields[9] = "opencode"; // @pane_agent
-        fields[11] = "/tmp"; // pane_current_path
-        fields[14] = "%0"; // pane_id
-        fields[21] = "/tmp"; // @pane_cwd
+        fields[6] = "12"; // pane_top
+        fields[7] = "3"; // pane_left
+        fields[11] = "opencode"; // @pane_agent
+        fields[13] = "/tmp"; // pane_current_path
+        fields[16] = "%0"; // pane_id
+        fields[23] = "/tmp"; // @pane_cwd
         let pid_str = pane_pid.to_string();
-        fields[19] = &pid_str; // pane_pid
+        fields[21] = &pid_str; // pane_pid
         fields.join("|")
     }
 
@@ -1288,8 +1317,13 @@ mod tests {
         let line_d = make_full_pane_line("grouped", 0);
 
         let input = format!("{line_a}\n{line_b}\n{line_c}\n{line_d}");
-        let (sessions_map, _) = build_session_hierarchy(&input, None);
+        let (sessions_map, _, pane_positions) = build_session_hierarchy(&input, None);
         let sessions = finalize_sessions(sessions_map);
+
+        assert_eq!(
+            pane_positions.get("%0"),
+            Some(&PanePosition { top: 12, left: 3 })
+        );
 
         // Should produce two sessions: "primary" and "grouped"
         assert_eq!(sessions.len(), 2);

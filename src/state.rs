@@ -87,6 +87,9 @@ pub struct AppState {
     /// Pane ID to tmux session/window ownership, rebuilt from every tmux
     /// session snapshot before the repo-only grouping step loses that shape.
     pub pane_locations: HashMap<String, PaneLocation>,
+    /// Pane geometry from the same `list-panes -a` snapshot. Current-window
+    /// agents use this to mirror tmux's top-to-bottom, then left-to-right order.
+    pub pane_positions: HashMap<String, crate::tmux::PanePosition>,
     /// Scroll offsets for the agents list and Git panel. Activity panel
     /// scroll lives in [`ActivityState::scroll`].
     pub scrolls: ScrollStates,
@@ -180,6 +183,7 @@ impl AppState {
             tmux_pane,
             current_window_id: String::new(),
             pane_locations: HashMap::new(),
+            pane_positions: HashMap::new(),
             scrolls: ScrollStates::default(),
             theme: ColorTheme::default(),
             icons: StatusIcons::default(),
@@ -225,7 +229,9 @@ mod tests {
     use super::*;
     use crate::activity::{TaskProgress, TaskStatus};
     use crate::group::{PaneGitInfo, RepoGroup};
-    use crate::tmux::{AgentType, PaneInfo, PaneStatus, PermissionMode, WorktreeMetadata};
+    use crate::tmux::{
+        AgentType, PaneInfo, PanePosition, PaneStatus, PermissionMode, WorktreeMetadata,
+    };
     use std::fs;
 
     /// Reset filter click debounce so the next `handle_filter_click` is not ignored.
@@ -288,6 +294,58 @@ mod tests {
         assert_eq!(state.layout.pane_row_targets[0].pane_id, "%1");
         assert_eq!(state.layout.pane_row_targets[1].pane_id, "%2");
         assert_eq!(state.layout.pane_row_targets[2].pane_id, "%3");
+    }
+
+    #[test]
+    fn rebuild_row_targets_matches_current_window_pane_geometry() {
+        let mut state = AppState::new("%99".into());
+        state.current_window_id = "@current".into();
+        state.repo_groups = vec![
+            RepoGroup {
+                name: "alpha".into(),
+                has_focus: false,
+                panes: vec![(test_pane("%bottom"), PaneGitInfo::default())],
+            },
+            RepoGroup {
+                name: "middle".into(),
+                has_focus: false,
+                panes: vec![(test_pane("%middle"), PaneGitInfo::default())],
+            },
+            RepoGroup {
+                name: "zeta".into(),
+                has_focus: true,
+                panes: vec![(test_pane("%top"), PaneGitInfo::default())],
+            },
+        ];
+        for pane_id in ["%top", "%middle", "%bottom"] {
+            state.pane_locations.insert(
+                pane_id.into(),
+                PaneLocation {
+                    session_name: "main".into(),
+                    window_id: "@current".into(),
+                    window_name: "editor".into(),
+                },
+            );
+        }
+        state
+            .pane_positions
+            .insert("%top".into(), PanePosition { top: 0, left: 0 });
+        state
+            .pane_positions
+            .insert("%middle".into(), PanePosition { top: 20, left: 0 });
+        state
+            .pane_positions
+            .insert("%bottom".into(), PanePosition { top: 40, left: 0 });
+
+        state.rebuild_row_targets();
+
+        let pane_ids: Vec<&str> = state
+            .layout
+            .pane_row_targets
+            .iter()
+            .map(|target| target.pane_id.as_str())
+            .collect();
+        assert_eq!(pane_ids, vec!["%top", "%middle", "%bottom"]);
     }
 
     #[test]

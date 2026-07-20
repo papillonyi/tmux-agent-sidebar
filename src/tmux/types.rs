@@ -2,6 +2,12 @@ pub const CLAUDE_AGENT: &str = "claude";
 pub const CODEX_AGENT: &str = "codex";
 pub const OPENCODE_AGENT: &str = "opencode";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PanePosition {
+    pub top: u16,
+    pub left: u16,
+}
+
 #[derive(Debug, Clone)]
 pub struct PaneInfo {
     pub pane_id: String,

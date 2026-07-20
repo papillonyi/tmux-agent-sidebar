@@ -6,8 +6,8 @@ use tmux_agent_sidebar::activity::{ActivityEntry, TaskProgress, TaskStatus};
 use tmux_agent_sidebar::group::{PaneGitInfo, RepoGroup};
 use tmux_agent_sidebar::state::{Focus, PaneLocation, PopupState, RepoFilter, StatusFilter};
 use tmux_agent_sidebar::tmux::{
-    AgentType, PaneInfo, PaneStatus, PermissionMode, SessionInfo, SubagentInfo, WindowInfo,
-    WorktreeMetadata,
+    AgentType, PaneInfo, PanePosition, PaneStatus, PermissionMode, SessionInfo, SubagentInfo,
+    WindowInfo, WorktreeMetadata,
 };
 
 // ─── UI Snapshot Tests ─────────────────────────────────────────────
@@ -112,6 +112,60 @@ fn snapshot_current_window_agents_top_other_windows_above_git() {
     ╭ Activity ────────────────╮
     │      No activity yet     │
     ╰──────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_current_window_agents_follow_tmux_pane_geometry() {
+    let mut top = make_pane(AgentType::Claude, PaneStatus::Running);
+    top.pane_id = "%top".into();
+    let mut middle = make_pane(AgentType::Codex, PaneStatus::Running);
+    middle.pane_id = "%middle".into();
+    let mut bottom = make_pane(AgentType::OpenCode, PaneStatus::Running);
+    bottom.pane_id = "%bottom".into();
+
+    let mut state = make_state(vec![]);
+    state.bottom_panel_height = 0;
+    state.current_window_id = "@1".into();
+    state.focus_state.focused_pane_id = Some("%top".into());
+    // Deliberately keep repo groups alphabetical, opposite to top/bottom
+    // placement, so the snapshot proves geometry wins over repo ordering.
+    state.repo_groups = vec![
+        make_repo_group("alpha", vec![bottom]),
+        make_repo_group("middle", vec![middle]),
+        make_repo_group("zeta", vec![top]),
+    ];
+    for pane_id in ["%top", "%middle", "%bottom"] {
+        state.pane_locations.insert(
+            pane_id.into(),
+            PaneLocation {
+                session_name: "main".into(),
+                window_id: "@1".into(),
+                window_name: "editor".into(),
+            },
+        );
+    }
+    state
+        .pane_positions
+        .insert("%top".into(), PanePosition { top: 0, left: 0 });
+    state
+        .pane_positions
+        .insert("%middle".into(), PanePosition { top: 20, left: 0 });
+    state
+        .pane_positions
+        .insert("%bottom".into(), PanePosition { top: 40, left: 0 });
+    state.rebuild_row_targets();
+
+    let output = render_to_string(&mut state, 28, 16);
+    insta::assert_snapshot!(output, @"
+     ≡3  ●3  ◎0  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    zeta
+    ┃ ● claude
+    middle
+      ● codex
+    alpha
+      ● opencode
     ");
 }
 

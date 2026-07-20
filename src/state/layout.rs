@@ -110,6 +110,46 @@ impl AppState {
         locations
     }
 
+    pub(crate) fn ordered_current_window_entries(&self) -> Vec<(usize, usize)> {
+        let mut panes = Vec::new();
+        for (group_index, group) in self.repo_groups.iter().enumerate() {
+            if !self.global.repo_filter.matches_group(&group.name) {
+                continue;
+            }
+            for (pane_index, (pane, _)) in group.panes.iter().enumerate() {
+                if self.global.status_filter.matches(&pane.status)
+                    && self.pane_is_in_current_window(&pane.pane_id)
+                {
+                    let encounter_order = panes.len();
+                    panes.push((encounter_order, group_index, pane_index));
+                }
+            }
+        }
+        panes.sort_by_key(|(encounter_order, group_index, pane_index)| {
+            let pane_id = &self.repo_groups[*group_index].panes[*pane_index].0.pane_id;
+            self.pane_positions
+                .get(pane_id)
+                .map(|position| (position.top, position.left, *encounter_order))
+                .unwrap_or((u16::MAX, u16::MAX, *encounter_order))
+        });
+        panes
+            .into_iter()
+            .map(|(_, group_index, pane_index)| (group_index, pane_index))
+            .collect()
+    }
+
+    pub(crate) fn ordered_current_window_pane_ids(&self) -> Vec<String> {
+        self.ordered_current_window_entries()
+            .into_iter()
+            .map(|(group_index, pane_index)| {
+                self.repo_groups[group_index].panes[pane_index]
+                    .0
+                    .pane_id
+                    .clone()
+            })
+            .collect()
+    }
+
     pub fn rebuild_row_targets(&mut self) {
         // Reset stale repo filter if the repo no longer exists, and
         // persist the reset back to tmux so fresh sidebar instances do
@@ -121,22 +161,9 @@ impl AppState {
             self.global.save_repo_filter();
         }
 
-        let mut pane_ids = Vec::new();
-
         // Current-window agents always lead the keyboard/mouse navigation
-        // order, matching their top-anchored visual section.
-        for group in &self.repo_groups {
-            if !self.global.repo_filter.matches_group(&group.name) {
-                continue;
-            }
-            for (pane, _) in &group.panes {
-                if self.global.status_filter.matches(&pane.status)
-                    && self.pane_is_in_current_window(&pane.pane_id)
-                {
-                    pane_ids.push(pane.pane_id.clone());
-                }
-            }
-        }
+        // order, matching their top-to-bottom tmux geometry.
+        let mut pane_ids = self.ordered_current_window_pane_ids();
 
         // Other windows are ordered by tmux session/window, then retain the
         // existing alphabetical repo order inside each window section.

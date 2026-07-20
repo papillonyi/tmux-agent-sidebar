@@ -166,7 +166,9 @@ impl AppState {
         let (focused, window_active, _, _, current_window_id) =
             tmux::get_sidebar_pane_info(&self.tmux_pane);
         self.current_window_id = current_window_id;
-        let (mut sessions, mut process_snapshot) = tmux::query_sessions_with_process_snapshot();
+        let (mut sessions, mut process_snapshot, pane_positions) =
+            tmux::query_sessions_with_process_snapshot();
+        self.pane_positions = pane_positions;
         self.sweep_dead_bg_shells_if_due(&mut sessions, &mut process_snapshot);
         if let Some(process_snapshot) = self.refresh_port_data(&sessions, process_snapshot.as_ref())
         {
