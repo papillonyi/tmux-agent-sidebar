@@ -16,7 +16,7 @@ if [[ -z "$SIDEBAR_BINARY" ]]; then
 fi
 
 INSTALLED_VERSION="$("$SIDEBAR_BINARY" version 2>/dev/null)"
-EXPECTED_VERSION="$(sed -n 's/^version *= *"\(.*\)"/\1/p' "$PLUGIN_DIR/Cargo.toml")"
+EXPECTED_VERSION="$(sed -n 's/^version *= *"\(.*\)"/\1/p' "$PLUGIN_DIR/Cargo.toml" | tr -d '\r')"
 
 if [[ -n "$EXPECTED_VERSION" && "$INSTALLED_VERSION" != "$EXPECTED_VERSION" ]]; then
     tmux run-shell -b "SIDEBAR_UPDATE=1 bash '$PLUGIN_DIR/install-wizard.sh'"
