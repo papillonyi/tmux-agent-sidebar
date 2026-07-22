@@ -106,12 +106,14 @@ fn push_pane(
     let pane_state = state.pane_state(&pane.pane_id);
     let ports = pane_state.map(|s| s.ports.as_slice());
     let task_progress = pane_state.and_then(|s| s.task_progress.as_ref());
+    let token_usage = pane_state.and_then(|s| s.codex_token_usage.as_ref());
     let status_line_idx = collected.lines.len();
-    let pane_lines = row::render_pane_lines_with_ports(
+    let pane_lines = row::render_pane_lines_with_runtime(
         pane,
         git_info,
         ports,
         task_progress,
+        token_usage,
         is_selected,
         is_active,
         width,

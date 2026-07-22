@@ -7,8 +7,8 @@ use super::commands::run_tmux;
 use super::options::{
     PANE_AGENT, PANE_ATTENTION, PANE_BG_CMD, PANE_CWD, PANE_NAME, PANE_PENDING_SESSION_END,
     PANE_PENDING_WORKTREE_REMOVE, PANE_PERMISSION_MODE, PANE_PROMPT, PANE_PROMPT_SOURCE, PANE_ROLE,
-    PANE_SESSION_ID, PANE_STARTED_AT, PANE_STATUS, PANE_SUBAGENTS, PANE_WAIT_REASON,
-    PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME, unset_pane_option,
+    PANE_SESSION_ID, PANE_STARTED_AT, PANE_STATUS, PANE_SUBAGENTS, PANE_TRANSCRIPT_PATH,
+    PANE_WAIT_REASON, PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME, unset_pane_option,
 };
 use super::subagent::parse_subagent_info;
 use super::types::{
@@ -60,6 +60,7 @@ pub(super) mod pane_line_field {
     pub const SESSION_ID: usize = 19; // absolute 27 (@pane_session_id)
     pub const SIDEBAR_SPAWNED: usize = 20; // absolute 28 (@agent-sidebar-spawned)
     pub const BG_CMD: usize = 21; // absolute 29 (@pane_bg_cmd)
+    pub const TRANSCRIPT_PATH: usize = 22; // absolute 30 (optional trailing field)
     /// Minimum number of fields the pane-line suffix must contain.
     /// Equals `session_line_field::MIN_FIELDS - PANE_LINE_OFFSET`.
     pub const MIN_FIELDS: usize = 22;
@@ -100,6 +101,7 @@ fn pane_format() -> String {
         q(PANE_SESSION_ID),
         q(SPAWNED_OPTION),
         q(PANE_BG_CMD),
+        q(PANE_TRANSCRIPT_PATH),
     ]
     .join("|")
 }
@@ -109,6 +111,13 @@ fn q(field: &str) -> String {
 }
 
 type SessionMap = indexmap::IndexMap<String, indexmap::IndexMap<String, WindowInfo>>;
+
+pub(crate) type SessionQuerySnapshot = (
+    Vec<SessionInfo>,
+    Option<ProcessSnapshot>,
+    HashMap<String, PanePosition>,
+    HashMap<String, String>,
+);
 
 /// (window_id, pane_index_in_window, pane_pid) — the minimum info needed to
 /// later retarget a permission-mode update at the right pane.
@@ -121,19 +130,15 @@ pub fn query_sessions() -> Vec<SessionInfo> {
     query_sessions_with_process_snapshot().0
 }
 
-pub(crate) fn query_sessions_with_process_snapshot() -> (
-    Vec<SessionInfo>,
-    Option<ProcessSnapshot>,
-    HashMap<String, PanePosition>,
-) {
+pub(crate) fn query_sessions_with_process_snapshot() -> SessionQuerySnapshot {
     let pane_format = pane_format();
     let all_panes_output = match run_tmux(&["list-panes", "-a", "-F", &pane_format]) {
         Some(s) => s,
-        None => return (vec![], None, HashMap::new()),
+        None => return (vec![], None, HashMap::new(), HashMap::new()),
     };
 
     let process_snapshot = process_snapshot_for_panes(&all_panes_output);
-    let (mut sessions_map, codex_pids, pane_positions) =
+    let (mut sessions_map, codex_pids, pane_positions, transcript_paths) =
         build_session_hierarchy(&all_panes_output, process_snapshot.as_ref());
     if !codex_pids.is_empty()
         && let Some(snapshot) = &process_snapshot
@@ -144,6 +149,7 @@ pub(crate) fn query_sessions_with_process_snapshot() -> (
         finalize_sessions(sessions_map),
         process_snapshot,
         pane_positions,
+        transcript_paths,
     )
 }
 
@@ -157,10 +163,12 @@ fn build_session_hierarchy(
     SessionMap,
     Vec<CodexPidEntry>,
     HashMap<String, PanePosition>,
+    HashMap<String, String>,
 ) {
     let mut sessions_map: SessionMap = indexmap::IndexMap::new();
     let mut codex_pids: Vec<CodexPidEntry> = Vec::new();
     let mut pane_positions = HashMap::new();
+    let mut transcript_paths = HashMap::new();
     let mut seen_pids: HashSet<u32> = HashSet::new();
 
     for line in all_panes_output.lines() {
@@ -212,6 +220,11 @@ fn build_session_hierarchy(
                         .unwrap_or(u16::MAX),
                 },
             );
+            if let Some(path) = pane_fields.get(pane_line_field::TRANSCRIPT_PATH)
+                && !path.is_empty()
+            {
+                transcript_paths.insert(pane.pane_id.clone(), path.clone());
+            }
             if pane.agent == AgentType::Codex
                 && let Some(pid) = pane.pane_pid
             {
@@ -221,7 +234,7 @@ fn build_session_hierarchy(
         }
     }
 
-    (sessions_map, codex_pids, pane_positions)
+    (sessions_map, codex_pids, pane_positions, transcript_paths)
 }
 
 /// Fan out Codex permission mode updates to every Codex pane across every
@@ -393,6 +406,7 @@ fn clear_agent_pane_state(pane_id: &str) {
         PANE_PROMPT_SOURCE,
         PANE_BG_CMD,
         PANE_SUBAGENTS,
+        PANE_TRANSCRIPT_PATH,
         PANE_CWD,
         PANE_PERMISSION_MODE,
         PANE_WORKTREE_NAME,
@@ -1289,9 +1303,10 @@ mod tests {
         // 19:@pane_started_at|20:@pane_wait_reason|21:pane_pid|
         // 22:@pane_subagents|23:@pane_cwd|24:@pane_permission_mode|
         // 25:@pane_worktree_name|26:@pane_worktree_branch|
-        // 27:@pane_session_id|28:@agent-sidebar-spawned|29:@pane_bg_cmd
-        // 30 total fields (MIN_FIELDS = 30)
-        let mut fields: Vec<&str> = vec![""; 30];
+        // 27:@pane_session_id|28:@agent-sidebar-spawned|29:@pane_bg_cmd|
+        // 30:@pane_transcript_path
+        // 31 current fields (the parser still accepts the legacy 30-field form)
+        let mut fields: Vec<&str> = vec![""; 31];
         fields[0] = session_name;
         fields[1] = "@0"; // window_id
         fields[3] = "win"; // window_name
@@ -1317,7 +1332,7 @@ mod tests {
         let line_d = make_full_pane_line("grouped", 0);
 
         let input = format!("{line_a}\n{line_b}\n{line_c}\n{line_d}");
-        let (sessions_map, _, pane_positions) = build_session_hierarchy(&input, None);
+        let (sessions_map, _, pane_positions, _) = build_session_hierarchy(&input, None);
         let sessions = finalize_sessions(sessions_map);
 
         assert_eq!(
@@ -1355,6 +1370,24 @@ mod tests {
             grouped.windows[0].panes[0].pane_pid,
             Some(0),
             "retained pane should be the zero-pid one"
+        );
+    }
+
+    #[test]
+    fn build_session_hierarchy_collects_transcript_path_by_pane() {
+        let input = {
+            let line = make_full_pane_line("primary", 42);
+            let mut fields: Vec<&str> = line.split('|').collect();
+            fields[16] = "%42";
+            fields[30] = "/tmp/codex-rollout.jsonl";
+            fields.join("|")
+        };
+
+        let (_, _, _, transcript_paths) = build_session_hierarchy(&input, None);
+
+        assert_eq!(
+            transcript_paths.get("%42").map(String::as_str),
+            Some("/tmp/codex-rollout.jsonl")
         );
     }
 }

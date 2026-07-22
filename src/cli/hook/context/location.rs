@@ -1,6 +1,24 @@
 use crate::event::WorktreeInfo;
 use crate::tmux;
 
+/// Store the parent Codex rollout path in pane-scoped tmux state so the TUI
+/// can read token updates without an extra subprocess per pane. Child hooks
+/// share the parent's pane and therefore must not replace this path.
+pub(in crate::cli::hook) fn sync_transcript_path(
+    pane: &str,
+    transcript_path: Option<&str>,
+    clear_if_missing: bool,
+) {
+    if !pane_writes_allowed(pane) {
+        return;
+    }
+    if let Some(path) = transcript_path.filter(|path| !path.is_empty()) {
+        tmux::set_pane_option(pane, tmux::PANE_TRANSCRIPT_PATH, path);
+    } else if clear_if_missing {
+        tmux::unset_pane_option(pane, tmux::PANE_TRANSCRIPT_PATH);
+    }
+}
+
 /// Returns whether the pane's cwd should be updated.
 /// When subagents are active, events may come from a subagent running in a
 /// worktree, so we should NOT overwrite the parent agent's cwd.
@@ -255,5 +273,35 @@ mod tests {
         assert!(pane_writes_allowed(pane));
         tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Explore:sub-1");
         assert!(!pane_writes_allowed(pane));
+    }
+
+    #[test]
+    fn sync_transcript_path_sets_and_clears_parent_value() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%TRANSCRIPT";
+
+        sync_transcript_path(pane, Some("/tmp/rollout.jsonl"), false);
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_TRANSCRIPT_PATH).as_deref(),
+            Some("/tmp/rollout.jsonl")
+        );
+
+        sync_transcript_path(pane, None, true);
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_TRANSCRIPT_PATH));
+    }
+
+    #[test]
+    fn sync_transcript_path_does_not_replace_parent_from_child_hook() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%TRANSCRIPT_CHILD";
+        tmux::test_mock::set(pane, tmux::PANE_TRANSCRIPT_PATH, "/tmp/parent.jsonl");
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Explore:sub-1");
+
+        sync_transcript_path(pane, Some("/tmp/child.jsonl"), false);
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_TRANSCRIPT_PATH).as_deref(),
+            Some("/tmp/parent.jsonl")
+        );
     }
 }

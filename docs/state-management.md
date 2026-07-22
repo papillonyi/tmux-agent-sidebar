@@ -27,7 +27,7 @@ Each pane's runtime data is split into two buckets:
 | Source | Update Trigger | Description |
 |--------|----------------|-------------|
 | tmux pane options | Event-driven + cleanup on agent exit | Agent type, status, cwd, permission mode, prompt, subagents, worktree, etc. |
-| `PaneRuntimeState` in `AppState` | Refresh cycle + cleanup on agent exit | `ports`, `command`, `task_progress`, `task_dismissed_total`, `inactive_since` |
+| `PaneRuntimeState` in `AppState` | Refresh cycle + cleanup on agent exit | `ports`, `command`, `task_progress`, Codex token usage/tracker, `task_dismissed_total`, `inactive_since` |
 
 Pane options written to tmux:
 
@@ -47,6 +47,7 @@ Pane options written to tmux:
 | `@pane_worktree_name` | SessionStart | Worktree name (if applicable) |
 | `@pane_worktree_branch` | SessionStart | Worktree branch (if applicable) |
 | `@pane_session_id` | SessionStart, UserPromptSubmit, Notification, Stop, StopFailure, PermissionDenied, CwdChanged | Agent-reported session id (skipped when subagents are active) |
+| `@pane_transcript_path` | Any recognized Codex hook; cleared on a SessionStart without a path and on agent exit | Agent-reported rollout JSONL path used for best-effort token usage reads (skipped when subagents are active) |
 
 In-memory per-pane runtime state. Every field lives inside
 `PaneRuntimeState` so the whole record is dropped together when its
@@ -61,12 +62,15 @@ pane disappears (`prune_pane_states_to_current_panes`).
 | `pane_states.map[...].inactive_since` | On status change | Debounce timestamp (3s grace before hiding tasks) |
 | `pane_states.map[...].bottom_panel_pref` | On active-panel change | Remembered Git/Activity scroll target per pane (cleared on relaunch) |
 | `pane_states.map[...].task_progress_log_mtime` | Every 1s (refresh cycle) | mtime of the task-progress log last parsed; skips re-parsing when unchanged |
+| `pane_states.map[...].codex_token_usage` | Every 1s (refresh cycle) | Latest cumulative token count, last-call context footprint, and model context window parsed from a Codex `token_count` event |
+| `pane_states.map[...].codex_usage_tracker` | Every 1s (refresh cycle) | Transcript path, mtime, byte offset, and partial-line buffer used to read only appended Codex JSONL data; first read is limited to the last 256 KiB |
 
 Per-pane file-based state:
 
 | File | Update Trigger | Read Frequency | Description |
 |------|---------------|----------------|-------------|
 | `/tmp/tmux-agent-activity_{pane_id}.log` | Each ActivityLog event | Every 1s | Tool usage log (`HH:MM\|tool\|label`), max 200 lines |
+| Codex rollout JSONL at `@pane_transcript_path` | Codex process | Every 1s (mtime/offset gated) | Best-effort source for cumulative token usage and context percentage. Codex documents `transcript_path` in hook input, but the transcript record schema is not a stable interface; missing or malformed records are ignored. |
 
 ### Local State (single sidebar process only)
 
@@ -118,7 +122,7 @@ Per-pane file-based state:
 │  Every 1s (refresh cycle)                                   │
 │  repo_groups, focus_state.focused_pane_id,                  │
 │  layout.pane_row_targets, activity.entries,                 │
-│  pane_states.map[..].task_progress                          │
+│  pane_states.map[..].task_progress, Codex token usage       │
 ├─────────────────────────────────────────────────────────────┤
 │  Every 10s (port scan, background)                          │
 │  pane_states.map[..].ports, agent liveness cleanup          │
@@ -162,6 +166,7 @@ Per-pane file-based state:
 Agent hooks (hook.sh)
   → CLI `hook` subcommand (cli/hook.rs)
     → resolve_adapter() (event.rs) → adapter.parse() → AgentEvent
+    → Codex adapter extracts transcript_path → @pane_transcript_path
     → handle_event() writes @pane_* tmux options + /tmp activity log files
                         ↓
 TUI main loop (app::run in app.rs; submodules app/{setup,workers,input,render})
@@ -175,6 +180,7 @@ TUI main loop (app::run in app.rs; submodules app/{setup,workers,input,render})
     → rebuild_row_targets()          ← applies GlobalState filters
     → refresh_activity_data()        ← reads /tmp activity logs
     → refresh_task_progress()        ← updates PaneRuntimeState.task_progress
+    → refresh_codex_token_usage()    ← incrementally reads Codex rollout JSONL
     → refresh_port_data()            ← updates PaneRuntimeState.ports
     → scan_session_process_snapshot() ← detects dead panes and clears stale tmux metadata
                         ↓
@@ -241,6 +247,8 @@ struct PaneRuntimeState {
     ports: Vec<u16>,
     command: Option<String>,
     task_progress: Option<TaskProgress>,
+    codex_token_usage: Option<CodexTokenUsage>,
+    codex_usage_tracker: CodexUsageTracker,
     task_dismissed_total: Option<usize>,
     inactive_since: Option<u64>,
     bottom_panel_pref: Option<BottomPanel>,

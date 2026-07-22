@@ -7,6 +7,13 @@ use crate::tmux::{CLAUDE_AGENT, CODEX_AGENT, OPENCODE_AGENT};
 /// Adapter that converts external agent events into internal `AgentEvent`.
 pub trait EventAdapter {
     fn parse(&self, event_name: &str, input: &Value) -> Option<AgentEvent>;
+
+    /// Return the parent session transcript path when the upstream agent
+    /// exposes one. Keeping this adapter-owned prevents hook dispatch from
+    /// inspecting agent-specific raw JSON.
+    fn transcript_path(&self, _input: &Value) -> Option<String> {
+        None
+    }
 }
 
 pub fn resolve_adapter(agent_name: &str) -> Option<Box<dyn EventAdapter>> {

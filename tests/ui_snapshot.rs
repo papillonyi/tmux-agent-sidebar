@@ -3,6 +3,7 @@ mod test_helpers;
 
 use test_helpers::*;
 use tmux_agent_sidebar::activity::{ActivityEntry, TaskProgress, TaskStatus};
+use tmux_agent_sidebar::codex_usage::CodexTokenUsage;
 use tmux_agent_sidebar::group::{PaneGitInfo, RepoGroup};
 use tmux_agent_sidebar::state::{Focus, PaneLocation, PopupState, RepoFilter, StatusFilter};
 use tmux_agent_sidebar::tmux::{
@@ -1607,6 +1608,35 @@ fn snapshot_focused_codex_pane_uses_accent_enclosure() {
     ┃   └ default #a81f      ● 2m5s┃
     ┃   review the focused pane    ┃
     ┃   styling                    ┃
+    ╭ Git ─────────────────────────╮
+    │      Working tree clean      │
+    ╰──────────────────────────────╯
+    ╭ Activity ────────────────────╮
+    │        No activity yet       │
+    ╰──────────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_codex_pane_shows_token_usage() {
+    let pane = make_pane(AgentType::Codex, PaneStatus::Running);
+    let pane_id = pane.pane_id.clone();
+    let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
+    state.set_pane_codex_token_usage(
+        &pane_id,
+        Some(CodexTokenUsage {
+            total_tokens: 65_336,
+            context_tokens: 17_682,
+            model_context_window: 258_400,
+        }),
+    );
+
+    let output = render_to_string(&mut state, 32, 25);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◎0  ◐0  ○0  ✕0
+    ⓘ                            — ▾
+    ┃ ● codex                      ┃
+    ┃   tok 65.3k            ctx 7%┃
     ╭ Git ─────────────────────────╮
     │      Working tree clean      │
     ╰──────────────────────────────╯

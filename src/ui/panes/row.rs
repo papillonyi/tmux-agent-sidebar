@@ -11,7 +11,7 @@ mod status;
 
 use body::{
     background_hint_row, idle_hint_row, prompt_rows, subagent_rows, task_progress_row,
-    wait_reason_row,
+    token_usage_row, wait_reason_row,
 };
 use branch::branch_ports_row;
 use ctx::{RowCtx, SELECTION_MARKER};
@@ -35,11 +35,43 @@ pub(super) fn has_focus_enclosure(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 pub(super) fn render_pane_lines_with_ports(
     pane: &crate::tmux::PaneInfo,
     git_info: &crate::group::PaneGitInfo,
     ports: Option<&[u16]>,
     task_progress: Option<&crate::activity::TaskProgress>,
+    selected: bool,
+    active: bool,
+    width: usize,
+    icons: &StatusIcons,
+    theme: &ColorTheme,
+    spinner_frame: usize,
+    now: u64,
+) -> Vec<Line<'static>> {
+    render_pane_lines_with_runtime(
+        pane,
+        git_info,
+        ports,
+        task_progress,
+        None,
+        selected,
+        active,
+        width,
+        icons,
+        theme,
+        spinner_frame,
+        now,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn render_pane_lines_with_runtime(
+    pane: &crate::tmux::PaneInfo,
+    git_info: &crate::group::PaneGitInfo,
+    ports: Option<&[u16]>,
+    task_progress: Option<&crate::activity::TaskProgress>,
+    token_usage: Option<&crate::codex_usage::CodexTokenUsage>,
     selected: bool,
     active: bool,
     width: usize,
@@ -112,6 +144,11 @@ pub(super) fn render_pane_lines_with_ports(
         out.push(line);
     }
     let ctx = &plain_ctx;
+    if pane.agent == AgentType::Codex
+        && let Some(usage) = token_usage
+    {
+        out.push(token_usage_row(usage, ctx));
+    }
     if let Some(line) = task_progress_row(task_progress, ctx) {
         out.push(line);
     }

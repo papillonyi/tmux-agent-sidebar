@@ -7,7 +7,7 @@ mod context;
 mod handlers;
 mod notifications;
 
-use context::sync_pane_location;
+use context::{sync_pane_location, sync_transcript_path};
 use notifications::notification_settings;
 
 // ─── hook subcommand ────────────────────────────────────────────────────────
@@ -30,9 +30,19 @@ pub(crate) fn cmd_hook(args: &[String]) -> i32 {
     }
 
     let input = read_stdin_json();
+    let transcript_path = adapter.transcript_path(&input);
     let Some(event) = adapter.parse(event_name, &input) else {
         return 0;
     };
+
+    // SessionStart begins a new parent session, so an absent path clears any
+    // stale value. Other events only fill or refresh a path when Codex reports
+    // one. Token values themselves are read by the TUI refresh loop.
+    sync_transcript_path(
+        &pane,
+        transcript_path.as_deref(),
+        event.kind() == crate::event::AgentEventKind::SessionStart,
+    );
 
     handle_event(&pane, agent_name, event)
 }

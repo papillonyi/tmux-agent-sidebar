@@ -4,10 +4,46 @@ use ratatui::{
 };
 
 use super::ctx::RowCtx;
+use crate::codex_usage::{CodexTokenUsage, compact_token_count};
 use crate::tmux::{PaneStatus, SubagentInfo};
 use crate::ui::text::{
     display_width, elapsed_label, truncate_to_width, wait_reason_label, wrap_text, wrap_text_char,
 };
+
+pub(super) fn token_usage_row(usage: &CodexTokenUsage, ctx: &RowCtx) -> Line<'static> {
+    let total = compact_token_count(usage.total_tokens);
+    let left_prefix = "  tok ";
+    let left_width = display_width(left_prefix) + display_width(&total);
+    let left_spans = vec![
+        Span::styled(
+            left_prefix,
+            ctx.apply_bg(Style::default().fg(ctx.theme.text_muted)),
+        ),
+        Span::styled(
+            total,
+            ctx.apply_bg(Style::default().fg(ctx.theme.agent_codex)),
+        ),
+    ];
+
+    let Some(percent) = usage.context_percent() else {
+        return ctx.row_line(left_spans, left_width);
+    };
+    let right = format!("ctx {percent}%");
+    let right_width = display_width(&right);
+    if left_width + right_width > ctx.inner_width {
+        return ctx.row_line(left_spans, left_width);
+    }
+
+    ctx.row_line_split(
+        left_spans,
+        left_width,
+        vec![Span::styled(
+            right,
+            ctx.apply_bg(Style::default().fg(ctx.theme.text_active)),
+        )],
+        right_width,
+    )
+}
 
 pub(super) fn task_progress_row(
     task_progress: Option<&crate::activity::TaskProgress>,

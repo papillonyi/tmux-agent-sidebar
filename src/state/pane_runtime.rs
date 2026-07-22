@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::AppState;
 use crate::activity::TaskProgress;
+use crate::codex_usage::{CodexTokenUsage, CodexUsageTracker};
 use crate::state::BottomPanel;
 
 /// Per-pane runtime state that should vanish together with the pane.
@@ -12,6 +13,11 @@ pub struct PaneRuntimeState {
     pub task_progress: Option<TaskProgress>,
     pub task_dismissed_total: Option<usize>,
     pub inactive_since: Option<u64>,
+    /// Latest valid Codex session token totals parsed from the pane's rollout.
+    /// `None` for other agents and until Codex emits its first `token_count`.
+    pub codex_token_usage: Option<CodexTokenUsage>,
+    /// File cursor and partial-line buffer used by the one-second refresh loop.
+    pub(crate) codex_usage_tracker: CodexUsageTracker,
     /// Last bottom panel the user selected while this pane was focused.
     /// `None` until the active panel changes at least once. Cleaned up
     /// automatically by `prune_pane_states_to_current_panes` when the
@@ -90,6 +96,15 @@ impl AppState {
         self.pane_state(pane_id).and_then(|s| s.command.as_deref())
     }
 
+    pub fn set_pane_codex_token_usage(&mut self, pane_id: &str, usage: Option<CodexTokenUsage>) {
+        self.pane_state_mut(pane_id).codex_token_usage = usage;
+    }
+
+    pub fn pane_codex_token_usage(&self, pane_id: &str) -> Option<&CodexTokenUsage> {
+        self.pane_state(pane_id)
+            .and_then(|state| state.codex_token_usage.as_ref())
+    }
+
     pub fn set_pane_task_progress(&mut self, pane_id: &str, progress: Option<TaskProgress>) {
         self.pane_state_mut(pane_id).task_progress = progress;
     }
@@ -160,6 +175,7 @@ mod tests {
         assert!(state.task_progress.is_none());
         assert!(state.task_dismissed_total.is_none());
         assert!(state.inactive_since.is_none());
+        assert!(state.codex_token_usage.is_none());
         assert!(state.bottom_panel_pref.is_none());
         assert!(state.task_progress_log_mtime.is_none());
     }

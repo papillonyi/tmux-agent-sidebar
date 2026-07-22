@@ -54,6 +54,10 @@ impl CodexAdapter {
 }
 
 impl EventAdapter for CodexAdapter {
+    fn transcript_path(&self, input: &Value) -> Option<String> {
+        optional_str(input, "transcript_path")
+    }
+
     fn parse(&self, event_name: &str, input: &Value) -> Option<AgentEvent> {
         match event_name {
             "session-start" => Some(AgentEvent::SessionStart {
@@ -136,6 +140,17 @@ mod tests {
     #[test]
     fn hook_registrations_match_parse_arms() {
         super::super::assert_table_drift_free("codex", CodexAdapter::HOOK_REGISTRATIONS);
+    }
+
+    #[test]
+    fn exposes_parent_transcript_path_as_common_metadata() {
+        assert_eq!(
+            CodexAdapter.transcript_path(&json!({
+                "transcript_path": "/tmp/codex-rollout.jsonl"
+            })),
+            Some("/tmp/codex-rollout.jsonl".into())
+        );
+        assert_eq!(CodexAdapter.transcript_path(&json!({})), None);
     }
 
     #[test]

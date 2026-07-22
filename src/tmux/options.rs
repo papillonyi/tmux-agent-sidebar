@@ -73,6 +73,9 @@ pub const PANE_STATUS: &str = "@pane_status";
 /// Non-empty ⇒ the pane is hosting subagent events and writes
 /// from their hooks must be filtered out of parent metadata.
 pub const PANE_SUBAGENTS: &str = "@pane_subagents";
+/// Parent Codex rollout JSONL path reported by lifecycle hooks. The sidebar
+/// uses it as a best-effort source for per-session token usage.
+pub const PANE_TRANSCRIPT_PATH: &str = "@pane_transcript_path";
 /// Reason the pane is in `waiting` status (`permission`,
 /// `session_resumed`, etc.).
 pub const PANE_WAIT_REASON: &str = "@pane_wait_reason";

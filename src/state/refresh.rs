@@ -4,7 +4,7 @@ use std::time::Duration;
 use crate::activity::{self, TaskProgress};
 use crate::cli::sanitize_tmux_value;
 use crate::process::ProcessSnapshot;
-use crate::tmux::{self, PaneStatus, SessionInfo};
+use crate::tmux::{self, AgentType, PaneStatus, SessionInfo};
 
 use super::{AppState, PaneLocation};
 
@@ -115,6 +115,7 @@ impl AppState {
             tmux::PANE_PROMPT,
             tmux::PANE_PROMPT_SOURCE,
             tmux::PANE_SUBAGENTS,
+            tmux::PANE_TRANSCRIPT_PATH,
             tmux::PANE_CWD,
             tmux::PANE_PERMISSION_MODE,
             tmux::PANE_WORKTREE_NAME,
@@ -159,6 +160,38 @@ impl AppState {
         self.auto_select_bottom_panel();
     }
 
+    /// Refresh best-effort Codex token totals from each parent rollout JSONL.
+    /// Transcript paths arrive in the same `list-panes -a` snapshot as the
+    /// rest of the pane state; per-pane trackers skip unchanged files and only
+    /// parse bytes appended since the previous one-second tick.
+    fn refresh_codex_token_usage(&mut self, transcript_paths: &HashMap<String, String>) {
+        let panes: Vec<(String, Option<String>)> = self
+            .repo_groups
+            .iter()
+            .flat_map(|group| group.panes.iter())
+            .filter(|(pane, _)| pane.agent == AgentType::Codex)
+            .map(|(pane, _)| {
+                (
+                    pane.pane_id.clone(),
+                    transcript_paths.get(&pane.pane_id).cloned(),
+                )
+            })
+            .collect();
+
+        for (pane_id, path) in panes {
+            let state = self.pane_state_mut(&pane_id);
+            if state.codex_usage_tracker.set_path(path.as_deref()) {
+                state.codex_token_usage = None;
+            }
+            if path.is_none() {
+                continue;
+            }
+            if let Ok(Some(usage)) = state.codex_usage_tracker.refresh() {
+                state.codex_token_usage = Some(usage);
+            }
+        }
+    }
+
     /// Fast refresh: tmux state + activity log (called every 1s).
     /// Returns whether the sidebar's window is the active tmux window.
     pub fn refresh(&mut self) -> bool {
@@ -166,7 +199,7 @@ impl AppState {
         let (focused, window_active, _, _, current_window_id) =
             tmux::get_sidebar_pane_info(&self.tmux_pane);
         self.current_window_id = current_window_id;
-        let (mut sessions, mut process_snapshot, pane_positions) =
+        let (mut sessions, mut process_snapshot, pane_positions, transcript_paths) =
             tmux::query_sessions_with_process_snapshot();
         self.pane_positions = pane_positions;
         self.sweep_dead_bg_shells_if_due(&mut sessions, &mut process_snapshot);
@@ -184,6 +217,7 @@ impl AppState {
             self.refresh_session_names();
             self.sessions.dirty = false;
         }
+        self.refresh_codex_token_usage(&transcript_paths);
         self.refresh_activity_data();
         window_active
     }
