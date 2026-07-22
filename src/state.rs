@@ -462,6 +462,45 @@ mod tests {
     }
 
     #[test]
+    fn codex_completed_plan_stays_visible_until_next_prompt_reset() {
+        let mut state = AppState::new("%99".into());
+        let pane_id = "%100_CODEX".to_string();
+        let mut pane = test_pane(&pane_id);
+        pane.agent = AgentType::Codex;
+        pane.status = PaneStatus::Idle;
+        state.repo_groups = vec![RepoGroup {
+            name: "test".into(),
+            has_focus: true,
+            panes: vec![(pane, PaneGitInfo::default())],
+        }];
+
+        let log_path = write_activity_log(&pane_id, "10:00|update_plan|tasks 4/4 ✔✔✔✔\n");
+        state.now = 100;
+        state.refresh_task_progress();
+
+        let progress = state
+            .pane_task_progress(&pane_id)
+            .expect("completed Codex plan should remain visible");
+        assert_eq!(progress.completed_count(), 4);
+        assert_eq!(progress.total(), 4);
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), None);
+
+        state.now = 104;
+        state.refresh_task_progress();
+        assert!(state.pane_task_progress(&pane_id).is_some());
+
+        fs::write(
+            &log_path,
+            "10:00|update_plan|tasks 4/4 ✔✔✔✔\n10:01|__task_reset__|\n",
+        )
+        .unwrap();
+        state.refresh_task_progress();
+        assert!(state.pane_task_progress(&pane_id).is_none());
+
+        fs::remove_file(&log_path).ok();
+    }
+
+    #[test]
     fn task_progress_reshows_when_new_tasks_added() {
         let mut state = AppState::new("%99".into());
         let pane_id = "%101".to_string();

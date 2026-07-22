@@ -57,7 +57,7 @@ pane disappears (`prune_pane_states_to_current_panes`).
 |-------|-----------------|-------------|
 | `pane_states.map[...].ports` | Every 10s (port scan) | Listening localhost ports detected from the pane process tree |
 | `pane_states.map[...].command` | Every 10s (port scan) | Best-effort commandline for the pane process tree, with tmux command fallback in the UI |
-| `pane_states.map[...].task_progress` | Every 1s (refresh cycle) | Parsed from activity log — task list per pane |
+| `pane_states.map[...].task_progress` | Every 1s (refresh cycle) | Parsed from activity log — Claude task deltas and complete Codex `update_plan` snapshots per pane |
 | `pane_states.map[...].task_dismissed_total` | On task completion | Tracks dismissed completed-task counts |
 | `pane_states.map[...].inactive_since` | On status change | Debounce timestamp (3s grace before hiding tasks) |
 | `pane_states.map[...].bottom_panel_pref` | On active-panel change | Remembered Git/Activity scroll target per pane (cleared on relaunch) |
@@ -69,7 +69,7 @@ Per-pane file-based state:
 
 | File | Update Trigger | Read Frequency | Description |
 |------|---------------|----------------|-------------|
-| `/tmp/tmux-agent-activity_{pane_id}.log` | Each ActivityLog event | Every 1s | Tool usage log (`HH:MM\|tool\|label`), max 200 lines |
+| `/tmp/tmux-agent-activity_{pane_id}.log` | Each ActivityLog event | Every 1s | Tool usage log (`HH:MM\|tool\|label`), including encoded Codex task-progress snapshots, max 200 lines |
 | Codex rollout JSONL at `@pane_transcript_path` | Codex process | Every 1s (mtime/offset gated) | Best-effort source for cumulative token usage and context percentage. Codex documents `transcript_path` in hook input, but the transcript record schema is not a stable interface; missing or malformed records are ignored. |
 
 ### Local State (single sidebar process only)
@@ -337,7 +337,7 @@ struct NoticesState {
 2. `activity.entries` contains only the focused pane's entries — cleared on focus change
 3. The active Git/Activity scroll target persists per pane in `PaneRuntimeState.bottom_panel_pref` and is restored on focus change. It vanishes together with the rest of `PaneRuntimeState` when the pane is pruned, so a relaunched agent starts with the default target
 4. Git polling runs every two seconds whenever `bottom_panel_height > 0`; active-panel selection does not gate it because the Git card is always visible
-5. Task progress has a 3-second debounce — prevents flicker when agent briefly pauses
+5. Task progress has a 3-second debounce to prevent flicker when an agent briefly pauses. A completed Codex plan remains visible as `N/N` until the next user-prompt reset; completed task batches from other agents retain the existing dismissal behavior
 6. Global state syncs via tmux variables — enables coordination across sidebar instances
 7. Scroll positions are independent per panel — agents, activity, git each have their own `ScrollState`
 8. `layout.line_to_row` is rebuilt every frame — ensures accurate click routing

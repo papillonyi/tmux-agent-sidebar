@@ -74,6 +74,10 @@ const STRATEGY_TABLE: &[(CanonicalTool, LabelStrategy)] = &[
         CanonicalTool::AskUserQuestion,
         LabelStrategy::Custom(label_ask_user_question),
     ),
+    (
+        CanonicalTool::UpdatePlan,
+        LabelStrategy::Custom(label_update_plan),
+    ),
 ];
 
 pub(crate) fn extract_tool_label(
@@ -192,6 +196,38 @@ fn label_ask_user_question(input: &Value, _: &Value) -> String {
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string()
+}
+
+/// Encode Codex's complete `update_plan` snapshot into one compact,
+/// human-readable activity label. The task-progress parser consumes the same
+/// icons, so the activity log remains both the display and persistence layer.
+fn label_update_plan(input: &Value, _: &Value) -> String {
+    let Some(plan) = input.get("plan").and_then(Value::as_array) else {
+        return String::new();
+    };
+
+    let mut completed = 0;
+    let mut icons = String::with_capacity(plan.len() * 3);
+    for item in plan {
+        let Some(status) = item.get("status").and_then(Value::as_str) else {
+            return String::new();
+        };
+        match status {
+            "pending" => icons.push('◻'),
+            "in_progress" => icons.push('◼'),
+            "completed" => {
+                completed += 1;
+                icons.push('✔');
+            }
+            _ => return String::new(),
+        }
+    }
+
+    if icons.is_empty() {
+        "tasks 0/0".into()
+    } else {
+        format!("tasks {completed}/{} {icons}", plan.len())
+    }
 }
 
 #[cfg(test)]
@@ -608,6 +644,43 @@ mod tests {
     fn label_exit_worktree_empty_name() {
         assert_eq!(
             extract_tool_label("ExitWorktree", &json!({}), &json!(null)),
+            ""
+        );
+    }
+
+    #[test]
+    fn label_update_plan_encodes_complete_snapshot() {
+        let input = json!({
+            "plan": [
+                {"step": "Inspect", "status": "completed"},
+                {"step": "Implement", "status": "in_progress"},
+                {"step": "Test", "status": "completed"},
+                {"step": "Deploy", "status": "pending"}
+            ]
+        });
+
+        assert_eq!(
+            extract_tool_label("update_plan", &input, &json!(null)),
+            "tasks 2/4 ✔◼✔◻"
+        );
+    }
+
+    #[test]
+    fn label_update_plan_handles_empty_or_invalid_payload() {
+        assert_eq!(
+            extract_tool_label("update_plan", &json!({"plan": []}), &json!(null)),
+            "tasks 0/0"
+        );
+        assert_eq!(
+            extract_tool_label("update_plan", &json!({}), &json!(null)),
+            ""
+        );
+        assert_eq!(
+            extract_tool_label(
+                "update_plan",
+                &json!({"plan": [{"step": "Broken", "status": "unknown"}]}),
+                &json!(null)
+            ),
             ""
         );
     }

@@ -22,15 +22,16 @@ impl ActivityEntry {
             "Agent" => 181,                           // soft pink
             "WebFetch" | "WebSearch" => 117,          // soft cyan
             "Skill" => 218,                           // soft magenta
-            "TaskCreate" | "TaskUpdate" | "TaskGet" | "TaskList" | "TaskStop" | "TaskOutput" => 223, // soft gold
+            "TaskCreate" | "TaskUpdate" | "TaskGet" | "TaskList" | "TaskStop" | "TaskOutput"
+            | "update_plan" => 223, // soft gold
             "SendMessage" | "TeamCreate" | "TeamDelete" => 182, // soft lavender
-            "LSP" => 146,                                       // soft teal
-            "NotebookEdit" => 180,                              // soft yellow (like Edit)
-            "AskUserQuestion" | "PushNotification" => 216,      // soft orange (attention)
+            "LSP" => 146,                             // soft teal
+            "NotebookEdit" => 180,                    // soft yellow (like Edit)
+            "AskUserQuestion" | "PushNotification" => 216, // soft orange (attention)
             "CronCreate" | "CronDelete" | "CronList" | "RemoteTrigger" => 151, // soft mint
-            "EnterPlanMode" | "ExitPlanMode" => 189,            // soft periwinkle
-            "EnterWorktree" | "ExitWorktree" => 179,            // soft bronze
-            "ToolSearch" => 250,                                // light gray
+            "EnterPlanMode" | "ExitPlanMode" => 189,  // soft periwinkle
+            "EnterWorktree" | "ExitWorktree" => 179,  // soft bronze
+            "ToolSearch" => 250,                      // light gray
             _ => 244,
         }
     }
@@ -140,6 +141,51 @@ impl TaskProgress {
 /// previous run cannot leak into a new one.
 pub const TASK_RESET_MARKER: &str = "__task_reset__";
 
+/// Decode the compact label written for a Codex `update_plan` PostToolUse
+/// event. Each event is a complete snapshot, so a valid label replaces the
+/// previously reconstructed task list instead of applying a delta.
+fn parse_codex_plan_snapshot(label: &str) -> Option<Vec<(String, String, TaskStatus)>> {
+    let snapshot = label.strip_prefix("tasks ")?;
+    let (counts, icons) = snapshot.split_once(' ').unwrap_or((snapshot, ""));
+    let (completed, total) = counts.split_once('/')?;
+    let completed = completed.parse::<usize>().ok()?;
+    let total = total.parse::<usize>().ok()?;
+
+    let statuses: Vec<TaskStatus> = icons
+        .chars()
+        .map(|icon| match icon {
+            '◻' => Some(TaskStatus::Pending),
+            '◼' => Some(TaskStatus::InProgress),
+            '✔' => Some(TaskStatus::Completed),
+            _ => None,
+        })
+        .collect::<Option<_>>()?;
+    if statuses.len() != total
+        || statuses
+            .iter()
+            .filter(|status| **status == TaskStatus::Completed)
+            .count()
+            != completed
+    {
+        return None;
+    }
+
+    Some(
+        statuses
+            .into_iter()
+            .enumerate()
+            .map(|(index, status)| {
+                let task_number = index + 1;
+                (
+                    task_number.to_string(),
+                    format!("Task {task_number}"),
+                    status,
+                )
+            })
+            .collect(),
+    )
+}
+
 /// Parse task progress from activity log entries.
 /// Entries are in reverse chronological order (newest first), so we reverse to process in order.
 pub fn parse_task_progress(entries: &[ActivityEntry]) -> TaskProgress {
@@ -194,6 +240,11 @@ pub fn parse_task_progress(entries: &[ActivityEntry]) -> TaskProgress {
                     if let Some(task) = tasks.iter_mut().find(|(tid, _, _)| tid == id) {
                         task.2 = new_status;
                     }
+                }
+            }
+            "update_plan" => {
+                if let Some(snapshot) = parse_codex_plan_snapshot(&entry.label) {
+                    tasks = snapshot;
                 }
             }
             _ => {}
@@ -389,6 +440,46 @@ mod tests {
         assert_eq!(progress.tasks[0].1, TaskStatus::Completed);
         assert_eq!(progress.tasks[1].0, "Wire RepoGroup");
         assert_eq!(progress.tasks[1].1, TaskStatus::InProgress);
+    }
+
+    #[test]
+    fn test_parse_codex_plan_uses_latest_complete_snapshot() {
+        let entries = vec![
+            task_entry("update_plan", "tasks 4/4 ✔✔✔✔"),
+            task_entry("Bash", "cargo test"),
+            task_entry("update_plan", "tasks 1/4 ✔◼◻◻"),
+        ];
+
+        let progress = parse_task_progress(&entries);
+
+        assert_eq!(progress.total(), 4);
+        assert_eq!(progress.completed_count(), 4);
+        assert!(progress.all_completed());
+        assert_eq!(progress.tasks[0].0, "Task 1");
+    }
+
+    #[test]
+    fn test_parse_codex_plan_ignores_malformed_snapshot() {
+        let entries = vec![
+            task_entry("update_plan", "tasks 4/4 ✔✔"),
+            task_entry("update_plan", "tasks 1/2 ✔◼"),
+        ];
+
+        let progress = parse_task_progress(&entries);
+
+        assert_eq!(progress.total(), 2);
+        assert_eq!(progress.completed_count(), 1);
+        assert_eq!(progress.in_progress_count(), 1);
+    }
+
+    #[test]
+    fn test_parse_codex_plan_resets_at_next_prompt_boundary() {
+        let entries = vec![
+            task_entry(TASK_RESET_MARKER, ""),
+            task_entry("update_plan", "tasks 2/2 ✔✔"),
+        ];
+
+        assert!(parse_task_progress(&entries).is_empty());
     }
 
     #[test]

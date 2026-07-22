@@ -1647,6 +1647,48 @@ fn snapshot_codex_pane_shows_token_usage() {
 }
 
 #[test]
+fn snapshot_codex_pane_shows_token_and_completed_plan() {
+    let pane = make_pane(AgentType::Codex, PaneStatus::Running);
+    let pane_id = pane.pane_id.clone();
+    let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
+    state.set_pane_codex_token_usage(
+        &pane_id,
+        Some(CodexTokenUsage {
+            total_tokens: 65_336,
+            context_tokens: 17_682,
+            model_context_window: 258_400,
+        }),
+    );
+    state.set_pane_task_progress(
+        &pane_id,
+        Some(TaskProgress {
+            tasks: vec![
+                ("Task 1".into(), TaskStatus::Completed),
+                ("Task 2".into(), TaskStatus::Completed),
+                ("Task 3".into(), TaskStatus::Completed),
+                ("Task 4".into(), TaskStatus::Completed),
+            ],
+        }),
+    );
+
+    let output = render_to_string(&mut state, 32, 30);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◎0  ◐0  ○0  ✕0
+    ⓘ                            — ▾
+    project
+    ┃ ● codex                      ┃
+    ┃   tok 65.3k            ctx 7%┃
+    ┃   ✔✔✔✔ 4/4                   ┃
+    ╭ Git ─────────────────────────╮
+    │      Working tree clean      │
+    ╰──────────────────────────────╯
+    ╭ Activity ────────────────────╮
+    │        No activity yet       │
+    ╰──────────────────────────────╯
+    ");
+}
+
+#[test]
 fn right_border_narrow_width_with_badge() {
     let mut pane = make_pane(AgentType::Claude, PaneStatus::Running);
     pane.started_at = Some(FIXED_NOW - 7200); // 2h ago

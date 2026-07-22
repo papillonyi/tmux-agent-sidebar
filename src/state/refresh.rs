@@ -343,8 +343,15 @@ impl AppState {
                 let grace_expired = next_inactive_since
                     .is_some_and(|since| self.now.saturating_sub(since) >= INACTIVE_GRACE_SECS);
 
-                let decision = if grace_expired && !progress.is_empty() && !progress.all_completed()
-                {
+                // Codex's own `task-progress` status item keeps the final N/N
+                // snapshot visible. Mirror that behavior until the next user
+                // prompt writes TASK_RESET_MARKER. Other agents retain the
+                // historical behavior of dismissing a completed batch.
+                let retain_completed_codex_plan =
+                    pane.agent == AgentType::Codex && progress.all_completed();
+                let decision = if retain_completed_codex_plan {
+                    TaskProgressDecision::Show
+                } else if grace_expired && !progress.is_empty() && !progress.all_completed() {
                     TaskProgressDecision::Dismiss {
                         total: progress.total(),
                     }
