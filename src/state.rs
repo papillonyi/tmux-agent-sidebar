@@ -245,7 +245,7 @@ mod tests {
             pane_id: id.into(),
             pane_active: false,
             status: PaneStatus::Running,
-            attention: false,
+            attention: None,
             agent: AgentType::Claude,
             path: "/tmp".into(),
             current_command: String::new(),

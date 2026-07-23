@@ -18,7 +18,7 @@ pub(in crate::cli::hook) fn on_session_start(
     source: &str,
 ) -> i32 {
     set_agent_meta(pane, ctx);
-    set_attention(pane, "clear");
+    set_attention(pane, None);
     clear_run_state(pane);
     set_notification_run_id(pane);
     tmux::unset_pane_option(pane, tmux::PANE_PROMPT);

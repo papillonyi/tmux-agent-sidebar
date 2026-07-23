@@ -74,11 +74,14 @@ fn set_status(pane: &str, status: &str) {
     }
 }
 
-fn set_attention(pane: &str, state: &str) {
-    if state == "clear" {
-        tmux::unset_pane_option(pane, tmux::PANE_ATTENTION);
-    } else {
-        tmux::set_pane_option(pane, tmux::PANE_ATTENTION, state);
+fn set_attention(pane: &str, kind: Option<tmux::PaneAttentionKind>) {
+    match kind {
+        None => tmux::unset_pane_option(pane, tmux::PANE_ATTENTION),
+        Some(kind) => {
+            let event_id = format!("{}-{}", crate::time::now_epoch_millis(), std::process::id());
+            let value = tmux::PaneAttention::encode(kind, &event_id);
+            tmux::set_pane_option(pane, tmux::PANE_ATTENTION, &value);
+        }
     }
 }
 

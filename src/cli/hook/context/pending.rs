@@ -37,7 +37,7 @@ pub(in crate::cli::hook) fn drain_pending_teardowns(pane: &str) {
 /// `on_session_end` when no subagents are active; subagent-active
 /// SessionEnds are short-circuited before they reach this point.
 pub(in crate::cli::hook) fn run_session_end_teardown(pane: &str) {
-    set_attention(pane, "clear");
+    set_attention(pane, None);
     clear_all_meta(pane);
     set_status(pane, "clear");
     let log_path = crate::activity::log_file_path(pane);

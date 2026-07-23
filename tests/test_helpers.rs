@@ -130,7 +130,7 @@ pub fn make_pane(agent: AgentType, status: PaneStatus) -> PaneInfo {
         pane_id: "%1".into(),
         pane_active: true,
         status,
-        attention: false,
+        attention: None,
         agent,
         path: "/home/user/project".into(),
         current_command: String::new(),

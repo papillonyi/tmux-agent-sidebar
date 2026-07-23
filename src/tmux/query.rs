@@ -12,8 +12,8 @@ use super::options::{
 };
 use super::subagent::parse_subagent_info;
 use super::types::{
-    AgentType, CODEX_AGENT, PaneInfo, PanePosition, PaneStatus, PermissionMode, SessionInfo,
-    WindowInfo, WorktreeMetadata,
+    AgentType, CODEX_AGENT, PaneAttention, PaneInfo, PanePosition, PaneStatus, PermissionMode,
+    SessionInfo, WindowInfo, WorktreeMetadata,
 };
 use crate::worktree::SPAWNED_OPTION;
 
@@ -361,7 +361,7 @@ fn parse_pane_fields_with_processes(
     Some(PaneInfo {
         pane_active: parts[pane_line_field::PANE_ACTIVE] == "1",
         status: PaneStatus::from_label(&parts[pane_line_field::PANE_STATUS]),
-        attention: !parts[pane_line_field::PANE_ATTENTION].is_empty(),
+        attention: PaneAttention::parse(&parts[pane_line_field::PANE_ATTENTION]),
         agent,
         path,
         current_command: parts[pane_line_field::PANE_CURRENT_COMMAND].to_string(),
@@ -591,6 +591,7 @@ fn split_tmux_fields(line: &str, delimiter: char) -> Vec<String> {
 mod tests {
     use super::super::options::test_mock;
     use super::*;
+    use crate::tmux::PaneAttentionKind;
 
     #[test]
     fn detect_codex_permission_mode_variants() {
@@ -617,7 +618,7 @@ mod tests {
             pane_id: id.into(),
             pane_active: false,
             status: PaneStatus::Idle,
-            attention: false,
+            attention: None,
             agent: AgentType::Codex,
             path: "/tmp".into(),
             current_command: String::new(),
@@ -874,6 +875,23 @@ mod tests {
             vec!["Explore", "Plan"]
         );
         assert_eq!(pane.permission_mode, PermissionMode::Auto);
+    }
+
+    #[test]
+    fn parse_pane_line_reads_typed_attention() {
+        let mut fields = full_fields();
+        fields[pane_line_field::PANE_ATTENTION] = "completed:123-9";
+        let pane = parse_pane_line(&make_pane_line(&fields)).unwrap();
+        assert_eq!(
+            pane.attention.as_ref().map(|attention| attention.kind),
+            Some(PaneAttentionKind::Completed)
+        );
+        assert_eq!(
+            pane.attention
+                .as_ref()
+                .map(|attention| attention.raw_value.as_str()),
+            Some("completed:123-9")
+        );
     }
 
     #[test]
@@ -1227,7 +1245,7 @@ mod tests {
                     pane_id: "%1".into(),
                     pane_active: true,
                     status: PaneStatus::Running,
-                    attention: false,
+                    attention: None,
                     agent: AgentType::Claude,
                     path: "/repo".into(),
                     current_command: String::new(),

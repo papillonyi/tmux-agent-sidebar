@@ -177,7 +177,6 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             task_id,
             task_subject,
         } => {
-            super::set_attention(pane, "notification");
             let notifications = notification_settings();
             handlers::on_task_completed(pane, agent_name, &task_id, &task_subject, &notifications)
         }
@@ -188,5 +187,29 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
         } => handlers::on_teammate_idle(pane, &teammate_name, &idle_reason),
         AgentEvent::WorktreeCreate => 0,
         AgentEvent::WorktreeRemove { .. } => handlers::on_worktree_remove(pane),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tmux;
+
+    #[test]
+    fn task_completed_does_not_write_pane_attention() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%TASK_COMPLETED_ONLY";
+
+        let exit = handle_event(
+            pane,
+            "claude",
+            AgentEvent::TaskCompleted {
+                task_id: "task-1".into(),
+                task_subject: "finish tests".into(),
+            },
+        );
+
+        assert_eq!(exit, 0);
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_ATTENTION));
     }
 }

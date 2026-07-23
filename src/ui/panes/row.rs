@@ -190,7 +190,7 @@ mod tests {
             pane_id: "%1".into(),
             pane_active: false,
             status,
-            attention: false,
+            attention: None,
             agent: AgentType::Codex,
             path: "/tmp/project".into(),
             current_command: String::new(),

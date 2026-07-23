@@ -20,7 +20,7 @@ pub(super) fn status_row(
 
     let (icon, pulse_color) = running_icon_for(&pane.status, spinner_frame, icons);
     let icon_color =
-        pulse_color.unwrap_or_else(|| theme.status_color(&pane.status, pane.attention));
+        pulse_color.unwrap_or_else(|| theme.status_color(&pane.status, pane.attention.is_some()));
     let title_raw: &str = if pane.session_name.is_empty() {
         pane.agent.label()
     } else {

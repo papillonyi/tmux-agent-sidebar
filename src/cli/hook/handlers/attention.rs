@@ -25,7 +25,7 @@ pub(in crate::cli::hook) fn on_notification(
         pane,
         resolve_notification_status(wait_reason, bg_shell_live),
     );
-    set_attention(pane, "notification");
+    set_attention(pane, Some(tmux::PaneAttentionKind::ActionRequired));
     if wait_reason.is_empty() {
         tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
     } else {
@@ -53,7 +53,7 @@ pub(in crate::cli::hook) fn on_permission_denied(
 ) -> i32 {
     set_agent_meta(pane, ctx);
     set_status(pane, "waiting");
-    set_attention(pane, "notification");
+    set_attention(pane, Some(tmux::PaneAttentionKind::ActionRequired));
     tmux::set_pane_option(pane, tmux::PANE_WAIT_REASON, "permission_denied");
     let _ = notify_lifecycle(
         pane,
@@ -75,7 +75,7 @@ pub(in crate::cli::hook) fn on_teammate_idle(
     teammate_name: &str,
     idle_reason: &str,
 ) -> i32 {
-    set_attention(pane, "notification");
+    set_attention(pane, Some(tmux::PaneAttentionKind::ActionRequired));
     let reason = if idle_reason.is_empty() {
         format!("teammate_idle:{teammate_name}")
     } else {
@@ -96,8 +96,12 @@ mod tests {
         let exit = on_teammate_idle(pane, "alice", "");
         assert_eq!(exit, 0);
         assert_eq!(
-            tmux::test_mock::get(pane, tmux::PANE_ATTENTION).as_deref(),
-            Some("notification")
+            tmux::PaneAttention::parse(
+                &tmux::test_mock::get(pane, tmux::PANE_ATTENTION).unwrap_or_default()
+            )
+            .expect("action-required attention")
+            .kind,
+            tmux::PaneAttentionKind::ActionRequired
         );
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_WAIT_REASON).as_deref(),
@@ -176,8 +180,12 @@ mod tests {
             Some("waiting")
         );
         assert_eq!(
-            tmux::test_mock::get(pane, tmux::PANE_ATTENTION).as_deref(),
-            Some("notification")
+            tmux::PaneAttention::parse(
+                &tmux::test_mock::get(pane, tmux::PANE_ATTENTION).unwrap_or_default()
+            )
+            .expect("action-required attention")
+            .kind,
+            tmux::PaneAttentionKind::ActionRequired
         );
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_WAIT_REASON).as_deref(),
@@ -356,6 +364,15 @@ mod tests {
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
             Some("waiting")
+        );
+        let attention = tmux::test_mock::get(pane, tmux::PANE_ATTENTION).unwrap_or_default();
+        assert!(
+            attention.starts_with("action_required:"),
+            "unexpected attention value: {attention}"
+        );
+        assert!(
+            !attention.trim_start_matches("action_required:").is_empty(),
+            "attention event id must not be empty"
         );
     }
 }

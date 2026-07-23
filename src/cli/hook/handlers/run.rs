@@ -21,7 +21,7 @@ pub(in crate::cli::hook) fn on_user_prompt_submit(
     prompt: &str,
 ) -> i32 {
     set_agent_meta(pane, ctx);
-    set_attention(pane, "clear");
+    set_attention(pane, None);
     set_status(pane, "running");
     set_notification_run_id(pane);
     if !prompt.is_empty() && !is_system_message(prompt) {
@@ -42,7 +42,7 @@ pub(in crate::cli::hook) fn on_stop(
     notifications: &desktop_notification::DesktopNotificationSettings,
 ) -> i32 {
     set_agent_meta(pane, ctx);
-    set_attention(pane, "clear");
+    set_attention(pane, None);
     if !last_message.is_empty() {
         let msg = sanitize_tmux_value(last_message);
         tmux::set_pane_option(pane, tmux::PANE_PROMPT, &msg);
@@ -64,6 +64,7 @@ pub(in crate::cli::hook) fn on_stop(
     set_status(pane, resolve_stop_status(bg_shell_live));
 
     if !bg_shell_live {
+        set_attention(pane, Some(tmux::PaneAttentionKind::Completed));
         let run_id = notification_run_id(pane);
         // Skip the generic Stop notification if an explicit TaskCompleted
         // stamp from the current run has already fired — otherwise Claude
@@ -102,7 +103,7 @@ pub(in crate::cli::hook) fn on_stop_failure(
     notifications: &desktop_notification::DesktopNotificationSettings,
 ) -> i32 {
     set_agent_meta(pane, ctx);
-    set_attention(pane, "clear");
+    set_attention(pane, None);
     clear_run_state(pane);
     mark_task_reset(pane);
     if !error.is_empty() {
@@ -288,6 +289,17 @@ mod tests {
             Some("idle")
         );
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_STARTED_AT));
+        let attention = tmux::test_mock::get(pane, tmux::PANE_ATTENTION).unwrap_or_default();
+        assert!(
+            attention.starts_with("completed:"),
+            "unexpected attention value: {attention}"
+        );
+        assert_eq!(
+            tmux::PaneAttention::parse(&attention)
+                .expect("completed attention")
+                .kind,
+            tmux::PaneAttentionKind::Completed
+        );
     }
 
     #[test]

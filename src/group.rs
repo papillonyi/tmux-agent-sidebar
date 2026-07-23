@@ -213,7 +213,7 @@ mod tests {
             pane_id: id.into(),
             pane_active: false,
             status: crate::tmux::PaneStatus::Running,
-            attention: false,
+            attention: None,
             agent: crate::tmux::AgentType::Claude,
             path: path.into(),
             current_command: String::new(),

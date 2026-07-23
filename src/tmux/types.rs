@@ -8,12 +8,65 @@ pub struct PanePosition {
     pub left: u16,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaneAttentionKind {
+    ActionRequired,
+    Completed,
+}
+
+impl PaneAttentionKind {
+    pub fn prefix(self) -> &'static str {
+        match self {
+            Self::ActionRequired => "action_required",
+            Self::Completed => "completed",
+        }
+    }
+
+    pub fn icon(self) -> &'static str {
+        match self {
+            Self::ActionRequired => "!",
+            Self::Completed => "✓",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaneAttention {
+    pub kind: PaneAttentionKind,
+    pub event_id: String,
+    pub raw_value: String,
+}
+
+impl PaneAttention {
+    pub fn parse(raw: &str) -> Option<Self> {
+        if raw.is_empty() {
+            return None;
+        }
+
+        let (kind, event_id) = match raw.split_once(':') {
+            Some(("action_required", id)) => (PaneAttentionKind::ActionRequired, id),
+            Some(("completed", id)) => (PaneAttentionKind::Completed, id),
+            _ => (PaneAttentionKind::ActionRequired, raw),
+        };
+
+        Some(Self {
+            kind,
+            event_id: event_id.to_string(),
+            raw_value: raw.to_string(),
+        })
+    }
+
+    pub fn encode(kind: PaneAttentionKind, event_id: &str) -> String {
+        format!("{}:{event_id}", kind.prefix())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PaneInfo {
     pub pane_id: String,
     pub pane_active: bool,
     pub status: PaneStatus,
-    pub attention: bool,
+    pub attention: Option<PaneAttention>,
     pub agent: AgentType,
     pub path: String,
     pub current_command: String,
@@ -202,6 +255,38 @@ impl PaneStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pane_attention_parses_typed_and_legacy_values() {
+        let action = PaneAttention::parse("action_required:1700000000000-7").unwrap();
+        assert_eq!(action.kind, PaneAttentionKind::ActionRequired);
+        assert_eq!(action.event_id, "1700000000000-7");
+        assert_eq!(action.raw_value, "action_required:1700000000000-7");
+
+        let completed = PaneAttention::parse("completed:1700000000001-8").unwrap();
+        assert_eq!(completed.kind, PaneAttentionKind::Completed);
+        assert_eq!(completed.event_id, "1700000000001-8");
+
+        assert_eq!(
+            PaneAttention::parse("notification").unwrap().kind,
+            PaneAttentionKind::ActionRequired
+        );
+        assert_eq!(
+            PaneAttention::parse("future-value").unwrap().kind,
+            PaneAttentionKind::ActionRequired
+        );
+        assert!(PaneAttention::parse("").is_none());
+    }
+
+    #[test]
+    fn pane_attention_encode_round_trips() {
+        let raw = PaneAttention::encode(PaneAttentionKind::Completed, "123-9");
+        assert_eq!(raw, "completed:123-9");
+        assert_eq!(
+            PaneAttention::parse(&raw).unwrap().kind,
+            PaneAttentionKind::Completed
+        );
+    }
 
     #[test]
     fn pane_status_from_str_all_variants() {

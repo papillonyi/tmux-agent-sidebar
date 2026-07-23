@@ -287,7 +287,7 @@ mod tests {
             pane_id: id.into(),
             pane_active: false,
             status,
-            attention: false,
+            attention: None,
             agent: AgentType::Claude,
             path: "/tmp/repo".into(),
             current_command: String::new(),
