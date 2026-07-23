@@ -111,22 +111,6 @@ impl AppState {
         }
     }
 
-    fn reconcile_pane_attention_styles(&self) {
-        let mut panes = self
-            .repo_groups
-            .iter()
-            .flat_map(|group| group.panes.iter().map(|(pane, _)| pane))
-            .filter(|pane| pane.attention.is_some())
-            .peekable();
-        if panes.peek().is_none() {
-            return;
-        }
-        let background = tmux::pane_attention_background();
-        for pane in panes {
-            tmux::apply_pane_attention_style(&pane.pane_id, &background);
-        }
-    }
-
     fn clear_dead_agent_metadata(pane_id: &str) {
         for key in &[
             tmux::PANE_AGENT,
@@ -233,7 +217,6 @@ impl AppState {
         } else {
             self.apply_session_snapshot(focused, sessions);
         }
-        self.reconcile_pane_attention_styles();
         if self.sessions.dirty {
             self.refresh_session_names();
             self.sessions.dirty = false;
@@ -921,29 +904,6 @@ mod tests {
                 .collect(),
         }];
         state
-    }
-
-    #[test]
-    fn reconcile_pane_attention_styles_applies_completed_green() {
-        let _guard = tmux::test_mock::install();
-        let mut action = test_pane("%ACTION");
-        action.attention = tmux::PaneAttention::parse("action_required:1-1");
-        let mut completed = test_pane("%COMPLETED");
-        completed.attention = tmux::PaneAttention::parse("completed:2-2");
-        let state = state_with_panes(vec![action, completed]);
-
-        state.reconcile_pane_attention_styles();
-
-        for pane in ["%ACTION", "%COMPLETED"] {
-            assert_eq!(
-                tmux::test_mock::get(pane, "window-style").as_deref(),
-                Some("bg=colour22")
-            );
-            assert_eq!(
-                tmux::test_mock::get(pane, "window-active-style").as_deref(),
-                Some("bg=colour22")
-            );
-        }
     }
 
     #[test]

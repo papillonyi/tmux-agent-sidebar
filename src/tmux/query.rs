@@ -5,12 +5,10 @@ use crate::process::{ProcessSnapshot, command_basename};
 
 use super::commands::run_tmux;
 use super::options::{
-    PANE_AGENT, PANE_ATTENTION, PANE_ATTENTION_PREV_WINDOW_ACTIVE_STYLE,
-    PANE_ATTENTION_PREV_WINDOW_STYLE, PANE_BG_CMD, PANE_CWD, PANE_NAME, PANE_PENDING_SESSION_END,
+    PANE_AGENT, PANE_ATTENTION, PANE_BG_CMD, PANE_CWD, PANE_NAME, PANE_PENDING_SESSION_END,
     PANE_PENDING_WORKTREE_REMOVE, PANE_PERMISSION_MODE, PANE_PROMPT, PANE_PROMPT_SOURCE, PANE_ROLE,
     PANE_SESSION_ID, PANE_STARTED_AT, PANE_STATUS, PANE_SUBAGENTS, PANE_TRANSCRIPT_PATH,
-    PANE_WAIT_REASON, PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME, restore_pane_attention_style,
-    unset_pane_option,
+    PANE_WAIT_REASON, PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME, unset_pane_option,
 };
 use super::subagent::parse_subagent_info;
 use super::types::{
@@ -63,8 +61,6 @@ pub(super) mod pane_line_field {
     pub const SIDEBAR_SPAWNED: usize = 20; // absolute 28 (@agent-sidebar-spawned)
     pub const BG_CMD: usize = 21; // absolute 29 (@pane_bg_cmd)
     pub const TRANSCRIPT_PATH: usize = 22; // absolute 30 (optional trailing field)
-    pub const ATTENTION_PREV_WINDOW_STYLE: usize = 23; // absolute 31 (optional trailing field)
-    pub const ATTENTION_PREV_WINDOW_ACTIVE_STYLE: usize = 24; // absolute 32 (optional trailing field)
     /// Minimum number of fields the pane-line suffix must contain.
     /// Equals `session_line_field::MIN_FIELDS - PANE_LINE_OFFSET`.
     pub const MIN_FIELDS: usize = 22;
@@ -106,8 +102,6 @@ fn pane_format() -> String {
         q(SPAWNED_OPTION),
         q(PANE_BG_CMD),
         q(PANE_TRANSCRIPT_PATH),
-        q(PANE_ATTENTION_PREV_WINDOW_STYLE),
-        q(PANE_ATTENTION_PREV_WINDOW_ACTIVE_STYLE),
     ]
     .join("|")
 }
@@ -306,17 +300,6 @@ fn parse_pane_fields_with_processes(
         return None;
     }
 
-    let attention = PaneAttention::parse(&parts[pane_line_field::PANE_ATTENTION]);
-    let has_saved_attention_style = [
-        pane_line_field::ATTENTION_PREV_WINDOW_STYLE,
-        pane_line_field::ATTENTION_PREV_WINDOW_ACTIVE_STYLE,
-    ]
-    .into_iter()
-    .any(|index| parts.get(index).is_some_and(|value| !value.is_empty()));
-    if attention.is_none() && has_saved_attention_style {
-        restore_pane_attention_style(&parts[pane_line_field::PANE_ID]);
-    }
-
     if parts[pane_line_field::PANE_ROLE] == "sidebar" {
         return None;
     }
@@ -378,7 +361,7 @@ fn parse_pane_fields_with_processes(
     Some(PaneInfo {
         pane_active: parts[pane_line_field::PANE_ACTIVE] == "1",
         status: PaneStatus::from_label(&parts[pane_line_field::PANE_STATUS]),
-        attention,
+        attention: PaneAttention::parse(&parts[pane_line_field::PANE_ATTENTION]),
         agent,
         path,
         current_command: parts[pane_line_field::PANE_CURRENT_COMMAND].to_string(),
@@ -909,72 +892,6 @@ mod tests {
                 .map(|attention| attention.raw_value.as_str()),
             Some("completed:123-9")
         );
-    }
-
-    #[test]
-    fn parse_pane_line_restores_stale_attention_style() {
-        let _guard = crate::tmux::test_mock::install();
-        let pane = "%1";
-        crate::tmux::test_mock::set(
-            pane,
-            crate::tmux::PANE_ATTENTION_PREV_WINDOW_STYLE,
-            "__tmux_agent_sidebar_unset__",
-        );
-        crate::tmux::test_mock::set(
-            pane,
-            crate::tmux::PANE_ATTENTION_PREV_WINDOW_ACTIVE_STYLE,
-            "__tmux_agent_sidebar_unset__",
-        );
-        crate::tmux::test_mock::set(pane, "window-style", "bg=colour22");
-        crate::tmux::test_mock::set(pane, "window-active-style", "bg=colour22");
-
-        let mut fields = full_fields();
-        fields.push(""); // optional @pane_transcript_path
-        fields.push("__tmux_agent_sidebar_unset__");
-        let parsed = parse_pane_line(&make_pane_line(&fields)).unwrap();
-
-        assert!(parsed.attention.is_none());
-        assert!(!crate::tmux::test_mock::contains(pane, "window-style"));
-        assert!(!crate::tmux::test_mock::contains(
-            pane,
-            "window-active-style"
-        ));
-        assert!(!crate::tmux::test_mock::contains(
-            pane,
-            crate::tmux::PANE_ATTENTION_PREV_WINDOW_STYLE
-        ));
-        assert!(!crate::tmux::test_mock::contains(
-            pane,
-            crate::tmux::PANE_ATTENTION_PREV_WINDOW_ACTIVE_STYLE
-        ));
-    }
-
-    #[test]
-    fn parse_pane_line_restores_stale_active_style_backup_on_its_own() {
-        let _guard = crate::tmux::test_mock::install();
-        let pane = "%1";
-        crate::tmux::test_mock::set(
-            pane,
-            crate::tmux::PANE_ATTENTION_PREV_WINDOW_ACTIVE_STYLE,
-            "__tmux_agent_sidebar_unset__",
-        );
-        crate::tmux::test_mock::set(pane, "window-active-style", "bg=colour22");
-
-        let mut fields = full_fields();
-        fields.push(""); // optional @pane_transcript_path
-        fields.push(""); // optional @pane_attention_prev_window_style
-        fields.push("__tmux_agent_sidebar_unset__");
-        let parsed = parse_pane_line(&make_pane_line(&fields)).unwrap();
-
-        assert!(parsed.attention.is_none());
-        assert!(!crate::tmux::test_mock::contains(
-            pane,
-            "window-active-style"
-        ));
-        assert!(!crate::tmux::test_mock::contains(
-            pane,
-            crate::tmux::PANE_ATTENTION_PREV_WINDOW_ACTIVE_STYLE
-        ));
     }
 
     #[test]
