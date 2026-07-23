@@ -46,6 +46,13 @@ impl AppState {
         None
     }
 
+    pub fn pane_by_id_mut(&mut self, pane_id: &str) -> Option<&mut tmux::PaneInfo> {
+        self.repo_groups
+            .iter_mut()
+            .flat_map(|group| group.panes.iter_mut())
+            .find_map(|(pane, _)| (pane.pane_id == pane_id).then_some(pane))
+    }
+
     pub fn selected_pane(&self) -> Option<&tmux::PaneInfo> {
         let target = self
             .layout
@@ -54,15 +61,42 @@ impl AppState {
         self.pane_by_id(&target.pane_id)
     }
 
-    pub fn find_focused_pane(&mut self) {
+    pub(crate) fn record_observed_focus(&mut self, observed: Option<String>) -> Option<String> {
+        if let Some(ref id) = observed {
+            self.focus_state.focused_pane_id = Some(id.clone());
+        }
+        observed
+    }
+
+    pub fn find_focused_pane(&mut self) -> Option<String> {
         // Query tmux directly for the active pane, not through `repo_groups`
         // which only contains agent panes. This allows activity/git info to
         // be displayed even when the focused pane has no agent running.
         // When the sidebar has focus, find_active_pane returns None — preserve
         // the previously focused pane so bottom panel data stays stable.
-        if let Some((id, _)) = tmux::find_active_pane(&self.tmux_pane) {
-            self.focus_state.focused_pane_id = Some(id);
+        let observed = tmux::find_active_pane(&self.tmux_pane).map(|(id, _)| id);
+        self.record_observed_focus(observed)
+    }
+
+    pub(crate) fn acknowledge_pane_attention_with<F>(&mut self, pane_id: &str, mut clear: F) -> bool
+    where
+        F: FnMut(&str, &str) -> bool,
+    {
+        let Some(expected) = self
+            .pane_by_id(pane_id)
+            .and_then(|pane| pane.attention.as_ref())
+            .map(|attention| attention.raw_value.clone())
+        else {
+            return false;
+        };
+
+        if !clear(pane_id, &expected) {
+            return false;
         }
+        if let Some(pane) = self.pane_by_id_mut(pane_id) {
+            pane.attention = None;
+        }
+        true
     }
 
     /// Move agent selection. Returns true if moved, false if at boundary.
@@ -172,6 +206,18 @@ mod tests {
         }
     }
 
+    fn state_with_attention(pane_id: &str, raw: &str) -> AppState {
+        let mut pane = test_pane(pane_id);
+        pane.attention = tmux::PaneAttention::parse(raw);
+        let mut state = AppState::new("%99".into());
+        state.repo_groups = vec![RepoGroup {
+            name: "alpha".into(),
+            has_focus: false,
+            panes: vec![(pane, PaneGitInfo::default())],
+        }];
+        state
+    }
+
     #[test]
     fn pane_by_id_searches_all_groups() {
         let mut state = AppState::new("%99".into());
@@ -244,5 +290,48 @@ mod tests {
         assert!(state.move_pane_selection(1));
         assert_eq!(state.global.selected_pane_row, 1);
         assert!(!state.move_pane_selection(5));
+    }
+
+    #[test]
+    fn acknowledgement_clears_matching_observed_attention() {
+        let mut state = state_with_attention("%1", "completed:1-1");
+        let cleared = state.acknowledge_pane_attention_with("%1", |pane, expected| {
+            assert_eq!(pane, "%1");
+            assert_eq!(expected, "completed:1-1");
+            true
+        });
+
+        assert!(cleared);
+        assert!(state.pane_by_id("%1").unwrap().attention.is_none());
+    }
+
+    #[test]
+    fn acknowledgement_keeps_attention_when_value_changed() {
+        let mut state = state_with_attention("%1", "completed:1-1");
+        let cleared = state.acknowledge_pane_attention_with("%1", |_, _| false);
+
+        assert!(!cleared);
+        assert!(state.pane_by_id("%1").unwrap().attention.is_some());
+    }
+
+    #[test]
+    fn cached_focus_without_new_observation_does_not_acknowledge() {
+        let mut state = state_with_attention("%1", "completed:1-1");
+        state.focus_state.focused_pane_id = Some("%1".into());
+
+        assert!(state.record_observed_focus(None).is_none());
+        assert_eq!(state.focus_state.focused_pane_id.as_deref(), Some("%1"));
+        assert!(state.pane_by_id("%1").unwrap().attention.is_some());
+    }
+
+    #[test]
+    fn newly_observed_focus_updates_sticky_focus_and_is_returned() {
+        let mut state = AppState::new("%99".into());
+
+        assert_eq!(
+            state.record_observed_focus(Some("%2".into())).as_deref(),
+            Some("%2")
+        );
+        assert_eq!(state.focus_state.focused_pane_id.as_deref(), Some("%2"));
     }
 }

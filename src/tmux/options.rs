@@ -184,6 +184,36 @@ pub fn get_pane_option_value(pane: &str, key: &str) -> String {
         .unwrap_or_default()
 }
 
+fn safe_tmux_attention_value(value: &str) -> bool {
+    value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | ':' | '-'))
+}
+
+/// Clear a pane option only if it still contains the value observed by the
+/// caller. Typed attention values use one server-side tmux format expansion,
+/// so a newer hook event cannot be erased between a client-side read and unset.
+pub fn clear_pane_option_if_value(pane: &str, key: &str, expected: &str) -> bool {
+    #[cfg(test)]
+    if let Some(cleared) = test_mock::intercept_clear_if_value(pane, key, expected) {
+        return cleared;
+    }
+
+    if safe_tmux_attention_value(expected) {
+        let keep_newer = format!("#{{?#{{==:#{{{key}}},{expected}}},,#{{{key}}}}}");
+        if run_tmux(&["set-option", "-p", "-F", "-t", pane, key, &keep_newer]).is_none() {
+            return false;
+        }
+        return get_pane_option_value(pane, key).is_empty();
+    }
+
+    if get_pane_option_value(pane, key) != expected {
+        return false;
+    }
+    unset_pane_option(pane, key);
+    get_pane_option_value(pane, key).is_empty()
+}
+
 /// Per-thread in-memory tmux pane store used by tests. Activated by
 /// installing a mock with [`test_mock::install`]; until then, all
 /// `set/unset/get_pane_option*` calls fall through to the real `tmux`
@@ -280,6 +310,22 @@ pub mod test_mock {
             })
         })
     }
+
+    pub(super) fn intercept_clear_if_value(pane: &str, key: &str, expected: &str) -> Option<bool> {
+        MOCK.with(|mock| {
+            let mut guard = mock.borrow_mut();
+            let store = guard.as_mut()?;
+            let slot = (pane.to_string(), key.to_string());
+            match store.get(&slot).cloned() {
+                None => Some(true),
+                Some(current) if current == expected => {
+                    store.remove(&slot);
+                    Some(true)
+                }
+                Some(_) => Some(false),
+            }
+        })
+    }
 }
 
 #[cfg(test)]
@@ -315,5 +361,34 @@ mod tests {
         }
         // No mock installed now — `contains` returns false.
         assert!(!test_mock::contains("%7", "@x"));
+    }
+
+    #[test]
+    fn clear_pane_option_if_value_clears_matching_mock_value() {
+        let _guard = test_mock::install();
+        test_mock::set("%1", PANE_ATTENTION, "completed:1-1");
+
+        assert!(clear_pane_option_if_value(
+            "%1",
+            PANE_ATTENTION,
+            "completed:1-1"
+        ));
+        assert!(!test_mock::contains("%1", PANE_ATTENTION));
+    }
+
+    #[test]
+    fn clear_pane_option_if_value_preserves_newer_mock_value() {
+        let _guard = test_mock::install();
+        test_mock::set("%1", PANE_ATTENTION, "action_required:2-2");
+
+        assert!(!clear_pane_option_if_value(
+            "%1",
+            PANE_ATTENTION,
+            "completed:1-1"
+        ));
+        assert_eq!(
+            test_mock::get("%1", PANE_ATTENTION).as_deref(),
+            Some("action_required:2-2")
+        );
     }
 }

@@ -104,7 +104,11 @@ impl AppState {
         }
         self.prune_pane_states_to_current_panes();
         self.rebuild_row_targets();
-        self.find_focused_pane();
+        if let Some(pane_id) = self.find_focused_pane() {
+            self.acknowledge_pane_attention_with(&pane_id, |pane, expected| {
+                tmux::clear_pane_option_if_value(pane, tmux::PANE_ATTENTION, expected)
+            });
+        }
     }
 
     fn clear_dead_agent_metadata(pane_id: &str) {
