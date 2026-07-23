@@ -158,26 +158,29 @@ needed.
 
 ## Rendering
 
-The row renderer derives one card background before creating any `RowCtx`:
+The row renderer derives an optional attention background before creating any
+`RowCtx`:
 
 1. unseen `ActionRequired` background,
-2. unseen `Completed` background,
-3. existing sidebar selection background, or
-4. no background.
+2. unseen `Completed` background, or
+3. no attention background.
 
 Attention backgrounds take precedence over the sidebar cursor background so
 merely selecting an unseen card cannot hide its semantic state. The existing
 left `┃` marker continues to show sidebar selection on top of the attention
-background.
+background. When no attention exists, the current selection-background behavior
+remains unchanged.
 
 Actual pane focus is acknowledged before rendering. Once acknowledged, the
 existing active-pane marker and focused Codex enclosure render normally; no
 attention/focus style overlap needs a separate visual state.
 
-Every row context, including body rows that currently omit selection
-background, receives the derived card background. Background application must
-cover content spans, inter-column gaps, left markers, right borders, and
-trailing padding without adding columns or changing click-target calculations.
+While attention is present, every row context receives its semantic background,
+including body rows that intentionally omit the ordinary selection background.
+Background application must cover content spans, inter-column gaps, left
+markers, right borders, and trailing padding without adding columns or changing
+click-target calculations. Without attention, body-row selection styling stays
+exactly as it is today.
 
 The status row substitutes `!` or `✓` for the normal status icon only while an
 unseen attention value is present. Both replacements occupy one display cell,
