@@ -14,9 +14,9 @@ impl CodexAdapter {
     /// `Stop`. This adapter currently wires the six registrations below.
     ///
     /// Caveats:
-    /// - `PostToolUse` covers supported Bash, `apply_patch`, MCP, and local
-    ///   function tool calls such as `update_plan`. The adapter accepts any
-    ///   non-empty `tool_name` and records the resulting activity.
+    /// - `PostToolUse` currently covers supported Bash, `apply_patch`, and MCP
+    ///   tool calls. The adapter accepts any non-empty `tool_name` and records
+    ///   the resulting activity.
     /// - `PreToolUse`, `PermissionRequest`, and compaction hooks are supported
     ///   by Codex but not yet wired here.
     pub const HOOK_REGISTRATIONS: &'static [HookRegistration] = &[
@@ -112,9 +112,9 @@ impl EventAdapter for CodexAdapter {
                     transcript_path: json_str(input, "agent_transcript_path").into(),
                 })
             }
-            // Codex emits PostToolUse for supported Bash, `apply_patch`, MCP,
-            // and local function tool calls. Preserve the upstream tool name
-            // and raw input/output so downstream labeling can handle each
+            // Codex currently emits PostToolUse for supported Bash,
+            // `apply_patch`, and MCP tool calls. Preserve the canonical tool
+            // name and raw input/output so downstream labeling can handle each
             // supported tool without agent-specific parsing here.
             "activity-log" => {
                 let tool_name = json_str(input, "tool_name");
