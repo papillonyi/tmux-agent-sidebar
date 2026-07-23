@@ -18,6 +18,14 @@ pub const PANE_NAME: &str = "@pane_name";
 /// Visual attention flag (`notification` / `clear`) that lights up
 /// the row when a hook wants the user's eye.
 pub const PANE_ATTENTION: &str = "@pane_attention";
+/// Original explicit pane `window-style` saved while an attention
+/// background override is active. An internal sentinel represents an
+/// originally inherited value.
+pub const PANE_ATTENTION_PREV_WINDOW_STYLE: &str = "@pane_attention_prev_window_style";
+/// Original explicit pane `window-active-style` saved while an attention
+/// background override is active.
+pub const PANE_ATTENTION_PREV_WINDOW_ACTIVE_STYLE: &str =
+    "@pane_attention_prev_window_active_style";
 /// Hook-reported working directory, preferred over tmux's
 /// `pane_current_path` for repo grouping.
 pub const PANE_CWD: &str = "@pane_cwd";
@@ -140,6 +148,10 @@ pub const SIDEBAR_ICON_ERROR: &str = "@sidebar_icon_error";
 pub const SIDEBAR_ICON_UNKNOWN: &str = "@sidebar_icon_unknown";
 
 pub fn get_option(name: &str) -> Option<String> {
+    #[cfg(test)]
+    if let Some(value) = test_mock::intercept_get_global(name) {
+        return (!value.is_empty()).then_some(value);
+    }
     run_tmux(&["show", "-gv", name])
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -169,6 +181,9 @@ pub fn set_pane_option(pane: &str, key: &str, value: &str) {
 }
 
 pub fn unset_pane_option(pane: &str, key: &str) {
+    if key == PANE_ATTENTION {
+        restore_pane_attention_style(pane);
+    }
     #[cfg(test)]
     if test_mock::intercept_unset(pane, key) {
         return;
@@ -186,6 +201,98 @@ pub fn get_pane_option_value(pane: &str, key: &str) -> String {
         .unwrap_or_default()
 }
 
+const WINDOW_STYLE: &str = "window-style";
+const WINDOW_ACTIVE_STYLE: &str = "window-active-style";
+const UNSET_STYLE: &str = "__tmux_agent_sidebar_unset__";
+
+fn normalize_pane_attention_color(value: Option<&str>) -> String {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return "colour22".to_string();
+    };
+    if let Ok(index) = value.parse::<u8>() {
+        return format!("colour{index}");
+    }
+    let hex = value.strip_prefix('#').unwrap_or(value);
+    if hex.len() == 6 && hex.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return format!("#{hex}");
+    }
+    "colour22".to_string()
+}
+
+pub fn pane_attention_background() -> String {
+    let configured = get_option(SIDEBAR_COLOR_ATTENTION_COMPLETED_BG);
+    normalize_pane_attention_color(configured.as_deref())
+}
+
+fn highlighted_style(base: &str, background: &str) -> String {
+    if base.is_empty() {
+        format!("bg={background}")
+    } else {
+        format!("{base},bg={background}")
+    }
+}
+
+fn apply_saved_style(pane: &str, option: &str, backup_option: &str, background: &str) {
+    let backup = get_pane_option_value(pane, backup_option);
+    let original = if backup.is_empty() {
+        let explicit = get_pane_option_value(pane, option);
+        let saved = if explicit.is_empty() {
+            UNSET_STYLE
+        } else {
+            explicit.as_str()
+        };
+        set_pane_option(pane, backup_option, saved);
+        explicit
+    } else if backup == UNSET_STYLE {
+        String::new()
+    } else {
+        backup
+    };
+    let base = if original.is_empty() {
+        get_option(option).unwrap_or_default()
+    } else {
+        original
+    };
+    set_pane_option(pane, option, &highlighted_style(&base, background));
+}
+
+pub fn apply_pane_attention_style(pane: &str, background: &str) {
+    apply_saved_style(
+        pane,
+        WINDOW_STYLE,
+        PANE_ATTENTION_PREV_WINDOW_STYLE,
+        background,
+    );
+    apply_saved_style(
+        pane,
+        WINDOW_ACTIVE_STYLE,
+        PANE_ATTENTION_PREV_WINDOW_ACTIVE_STYLE,
+        background,
+    );
+}
+
+fn restore_saved_style(pane: &str, option: &str, backup_option: &str) {
+    let backup = get_pane_option_value(pane, backup_option);
+    if backup.is_empty() {
+        return;
+    }
+    if backup == UNSET_STYLE {
+        unset_pane_option(pane, option);
+    } else {
+        set_pane_option(pane, option, &backup);
+    }
+    unset_pane_option(pane, backup_option);
+}
+
+pub fn restore_pane_attention_style(pane: &str) {
+    restore_saved_style(pane, WINDOW_STYLE, PANE_ATTENTION_PREV_WINDOW_STYLE);
+    restore_saved_style(
+        pane,
+        WINDOW_ACTIVE_STYLE,
+        PANE_ATTENTION_PREV_WINDOW_ACTIVE_STYLE,
+    );
+}
+
 fn safe_tmux_attention_value(value: &str) -> bool {
     value
         .chars()
@@ -198,6 +305,9 @@ fn safe_tmux_attention_value(value: &str) -> bool {
 pub fn clear_pane_option_if_value(pane: &str, key: &str, expected: &str) -> bool {
     #[cfg(test)]
     if let Some(cleared) = test_mock::intercept_clear_if_value(pane, key, expected) {
+        if cleared && key == PANE_ATTENTION {
+            restore_pane_attention_style(pane);
+        }
         return cleared;
     }
 
@@ -206,7 +316,11 @@ pub fn clear_pane_option_if_value(pane: &str, key: &str, expected: &str) -> bool
         if run_tmux(&["set-option", "-p", "-F", "-t", pane, key, &keep_newer]).is_none() {
             return false;
         }
-        return get_pane_option_value(pane, key).is_empty();
+        let cleared = get_pane_option_value(pane, key).is_empty();
+        if cleared && key == PANE_ATTENTION {
+            restore_pane_attention_style(pane);
+        }
+        return cleared;
     }
 
     if get_pane_option_value(pane, key) != expected {
@@ -227,6 +341,7 @@ pub mod test_mock {
     use std::collections::HashMap;
 
     type Store = HashMap<(String, String), String>;
+    const GLOBAL_SCOPE: &str = "__global__";
 
     thread_local! {
         static MOCK: RefCell<Option<Store>> = const { RefCell::new(None) };
@@ -255,6 +370,10 @@ pub mod test_mock {
                 store.insert((pane.to_string(), key.to_string()), value.to_string());
             }
         });
+    }
+
+    pub fn set_global(key: &str, value: &str) {
+        set(GLOBAL_SCOPE, key, value);
     }
 
     /// Read a pane option from the mock store. Returns `None` if no mock
@@ -311,6 +430,10 @@ pub mod test_mock {
                     .unwrap_or_default()
             })
         })
+    }
+
+    pub(super) fn intercept_get_global(key: &str) -> Option<String> {
+        intercept_get(GLOBAL_SCOPE, key)
     }
 
     pub(super) fn intercept_clear_if_value(pane: &str, key: &str, expected: &str) -> Option<bool> {
@@ -392,5 +515,86 @@ mod tests {
             test_mock::get("%1", PANE_ATTENTION).as_deref(),
             Some("action_required:2-2")
         );
+    }
+
+    #[test]
+    fn pane_attention_background_normalizes_theme_values() {
+        assert_eq!(normalize_pane_attention_color(Some("22")), "colour22");
+        assert_eq!(normalize_pane_attention_color(Some("#005f00")), "#005f00");
+        assert_eq!(normalize_pane_attention_color(Some("005F00")), "#005F00");
+        assert_eq!(normalize_pane_attention_color(Some("invalid")), "colour22");
+        assert_eq!(normalize_pane_attention_color(None), "colour22");
+    }
+
+    #[test]
+    fn attention_style_restores_inherited_pane_styles() {
+        let _guard = test_mock::install();
+        test_mock::set_global("window-style", "fg=default,bg=#1f2f38");
+        test_mock::set_global("window-active-style", "fg=default,bg=terminal");
+
+        apply_pane_attention_style("%1", "colour22");
+
+        assert_eq!(
+            test_mock::get("%1", "window-style").as_deref(),
+            Some("fg=default,bg=#1f2f38,bg=colour22")
+        );
+        assert_eq!(
+            test_mock::get("%1", "window-active-style").as_deref(),
+            Some("fg=default,bg=terminal,bg=colour22")
+        );
+
+        restore_pane_attention_style("%1");
+
+        assert!(!test_mock::contains("%1", "window-style"));
+        assert!(!test_mock::contains("%1", "window-active-style"));
+    }
+
+    #[test]
+    fn attention_style_preserves_explicit_pane_styles_across_reapply() {
+        let _guard = test_mock::install();
+        test_mock::set("%1", "window-style", "fg=white,bg=blue");
+        test_mock::set("%1", "window-active-style", "fg=yellow,bold");
+
+        apply_pane_attention_style("%1", "colour22");
+        apply_pane_attention_style("%1", "colour22");
+        restore_pane_attention_style("%1");
+
+        assert_eq!(
+            test_mock::get("%1", "window-style").as_deref(),
+            Some("fg=white,bg=blue")
+        );
+        assert_eq!(
+            test_mock::get("%1", "window-active-style").as_deref(),
+            Some("fg=yellow,bold")
+        );
+    }
+
+    #[test]
+    fn clearing_matching_attention_restores_saved_styles() {
+        let _guard = test_mock::install();
+        test_mock::set("%1", PANE_ATTENTION, "completed:1-1");
+        apply_pane_attention_style("%1", "colour22");
+
+        assert!(clear_pane_option_if_value(
+            "%1",
+            PANE_ATTENTION,
+            "completed:1-1"
+        ));
+        assert!(!test_mock::contains("%1", PANE_ATTENTION));
+        assert!(!test_mock::contains("%1", PANE_ATTENTION_PREV_WINDOW_STYLE));
+        assert!(!test_mock::contains("%1", "window-style"));
+    }
+
+    #[test]
+    fn unsetting_attention_restores_saved_styles() {
+        let _guard = test_mock::install();
+        test_mock::set("%1", PANE_ATTENTION, "completed:1-1");
+        apply_pane_attention_style("%1", "colour22");
+
+        unset_pane_option("%1", PANE_ATTENTION);
+
+        assert!(!test_mock::contains("%1", PANE_ATTENTION));
+        assert!(!test_mock::contains("%1", PANE_ATTENTION_PREV_WINDOW_STYLE));
+        assert!(!test_mock::contains("%1", "window-style"));
     }
 }
