@@ -15,8 +15,8 @@ pub const PANE_AGENT: &str = "@pane_agent";
 /// Optional human-readable pane label. Currently queried to preserve
 /// the `list-panes` field layout, but not rendered.
 pub const PANE_NAME: &str = "@pane_name";
-/// Visual attention flag (`notification` / `clear`) that lights up
-/// the row when a hook wants the user's eye.
+/// Unseen attention event (`action_required:<id>` / `completed:<id>`)
+/// that lights up the Sidebar card and corresponding tmux pane.
 pub const PANE_ATTENTION: &str = "@pane_attention";
 /// Original explicit pane `window-style` saved while an attention
 /// background override is active. An internal sentinel represents an
@@ -201,6 +201,19 @@ pub fn get_pane_option_value(pane: &str, key: &str) -> String {
         .unwrap_or_default()
 }
 
+fn get_effective_window_option(pane: &str, key: &str) -> Option<String> {
+    #[cfg(test)]
+    if let Some(value) = test_mock::intercept_get_window(pane, key) {
+        return (!value.is_empty())
+            .then_some(value)
+            .or_else(|| get_option(key));
+    }
+    run_tmux(&["show-options", "-w", "-A", "-v", "-t", pane, key])
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| get_option(key))
+}
+
 const WINDOW_STYLE: &str = "window-style";
 const WINDOW_ACTIVE_STYLE: &str = "window-active-style";
 const UNSET_STYLE: &str = "__tmux_agent_sidebar_unset__";
@@ -249,7 +262,7 @@ fn apply_saved_style(pane: &str, option: &str, backup_option: &str, background: 
         backup
     };
     let base = if original.is_empty() {
-        get_option(option).unwrap_or_default()
+        get_effective_window_option(pane, option).unwrap_or_default()
     } else {
         original
     };
@@ -342,6 +355,7 @@ pub mod test_mock {
 
     type Store = HashMap<(String, String), String>;
     const GLOBAL_SCOPE: &str = "__global__";
+    const WINDOW_OPTION_PREFIX: &str = "__window__:";
 
     thread_local! {
         static MOCK: RefCell<Option<Store>> = const { RefCell::new(None) };
@@ -374,6 +388,10 @@ pub mod test_mock {
 
     pub fn set_global(key: &str, value: &str) {
         set(GLOBAL_SCOPE, key, value);
+    }
+
+    pub fn set_window(pane: &str, key: &str, value: &str) {
+        set(pane, &format!("{WINDOW_OPTION_PREFIX}{key}"), value);
     }
 
     /// Read a pane option from the mock store. Returns `None` if no mock
@@ -434,6 +452,10 @@ pub mod test_mock {
 
     pub(super) fn intercept_get_global(key: &str) -> Option<String> {
         intercept_get(GLOBAL_SCOPE, key)
+    }
+
+    pub(super) fn intercept_get_window(pane: &str, key: &str) -> Option<String> {
+        intercept_get(pane, &format!("{WINDOW_OPTION_PREFIX}{key}"))
     }
 
     pub(super) fn intercept_clear_if_value(pane: &str, key: &str, expected: &str) -> Option<bool> {
@@ -561,6 +583,26 @@ mod tests {
 
         assert!(!test_mock::contains("%1", "window-style"));
         assert!(!test_mock::contains("%1", "window-active-style"));
+    }
+
+    #[test]
+    fn attention_style_uses_effective_window_styles_for_target_pane() {
+        let _guard = test_mock::install();
+        test_mock::set_global("window-style", "fg=default,bg=black");
+        test_mock::set_global("window-active-style", "fg=default,bg=terminal");
+        test_mock::set_window("%1", "window-style", "fg=white,bg=blue");
+        test_mock::set_window("%1", "window-active-style", "fg=yellow,bold");
+
+        apply_pane_attention_style("%1", "colour22");
+
+        assert_eq!(
+            test_mock::get("%1", "window-style").as_deref(),
+            Some("fg=white,bg=blue,bg=colour22")
+        );
+        assert_eq!(
+            test_mock::get("%1", "window-active-style").as_deref(),
+            Some("fg=yellow,bold,bg=colour22")
+        );
     }
 
     #[test]
