@@ -18,6 +18,16 @@ reloaded on SIGUSR1.
 
 Each field has a corresponding `last_saved_*` to prevent sync conflicts — only overwrites tmux if the local write succeeded.
 
+Attention-card colors use the same global tmux theme override mechanism as the
+rest of the sidebar:
+
+| Tmux Variable | Default | Description |
+|---------------|---------|-------------|
+| `@sidebar_color_attention_action_bg` | xterm-256 index `58` | Full-card background for an unseen action-required event |
+| `@sidebar_color_attention_completed_bg` | xterm-256 index `22` | Full-card background for an unseen completed-turn event |
+
+Both options also accept six-digit RGB values through the normal theme parser.
+
 ### Per-pane State (keyed by pane ID)
 
 Written by `cli/hook.rs` on agent events, read by `query_sessions()` every **1 second**.
@@ -40,7 +50,7 @@ Pane options written to tmux:
 | `@pane_prompt` | UserPromptSubmit, Stop | Latest prompt or response text |
 | `@pane_prompt_source` | UserPromptSubmit, Stop | "user" or "response" |
 | `@pane_started_at` | UserPromptSubmit | Unix epoch when agent started |
-| `@pane_attention` | SessionStart, Stop, StopFailure (clear); Notification, PermissionDenied, TeammateIdle (set) | "notification" or "clear" |
+| `@pane_attention` | Attention/completion hooks (set); activity, teardown, or observed pane focus (clear) | Unseen event encoded as `action_required:<event-id>` or `completed:<event-id>` |
 | `@pane_wait_reason` | StopFailure, PermissionDenied, TeammateIdle | Reason for waiting/error (`permission_denied`, `teammate_idle:<name>`, or error text) |
 | `@pane_bg_cmd` | ActivityLog (bg Bash), Refresh sweep (clear), SessionEnd (clear) | Latest sanitized command of a Bash tool started with `run_in_background`. Its presence is the single source of truth for "live bg shell" — Stop routes to `background` while it is set, and the row body renders the command. Persists across UserPromptSubmit so shells spanning turns stay visible; overwritten by the next bg Bash. The refresh loop runs a `ps`-based liveness sweep each tick and clears the marker (plus downgrades `background → idle`) when no process matches the stored command. Only the most recent bg Bash is tracked; older ones are not retained. |
 | `@pane_subagents` | SubagentStart/Stop | Comma-separated `Type:id;started_at=<epoch-seconds>` active subagent list; legacy `Type` and `Type:id` entries remain readable |
@@ -48,6 +58,19 @@ Pane options written to tmux:
 | `@pane_worktree_branch` | SessionStart | Worktree branch (if applicable) |
 | `@pane_session_id` | SessionStart, UserPromptSubmit, Notification, Stop, StopFailure, PermissionDenied, CwdChanged | Agent-reported session id (skipped when subagents are active) |
 | `@pane_transcript_path` | Any recognized Codex hook; cleared on a SessionStart without a path and on agent exit | Agent-reported rollout JSONL path used for best-effort token usage reads (skipped when subagents are active) |
+
+`Notification`, `PermissionDenied`, and `TeammateIdle` write a fresh
+`action_required` event. A normal `Stop` writes `completed` only when no live
+background shell remains; `StopFailure` stays an ordinary error without
+completion attention. Legacy `notification` and other unknown non-empty values
+remain readable as action-required attention.
+
+The refresh path acknowledges attention only for a non-sidebar pane observed as
+active by the current tmux focus query. It does not use the sticky
+`focus_state.focused_pane_id`, which is retained while the sidebar has focus for
+stable Git and Activity panels. Acknowledgement compare-and-clears the exact raw
+event value from the snapshot, so a newer hook event cannot be erased by an
+older focus observation.
 
 In-memory per-pane runtime state. Every field lives inside
 `PaneRuntimeState` so the whole record is dropped together when its
@@ -77,7 +100,7 @@ Per-pane file-based state:
 | Field | Update Frequency | Description |
 |-------|-----------------|-------------|
 | `repo_groups` | Every 1s | Panes grouped by git repo root (built directly from `tmux::query_sessions()` output, not stored separately as a session list) |
-| `focus_state.focused_pane_id` | Every 1s, plus immediately on user-initiated pane jumps | Currently focused agent pane |
+| `focus_state.focused_pane_id` | Every 1s, plus immediately on user-initiated pane jumps | Sticky display focus for the Git and Activity panels; never used by itself to acknowledge attention |
 | `focus_state.sidebar_focused` | Every 1s | Whether sidebar pane itself has focus |
 | `focus_state.focus` | On user input | UI focus: `Filter` / `Panes` / `BottomPanel`; input also triggers an immediate redraw so focus changes appear without waiting for the next poll tick |
 | `focus_state.prev_focused_pane_id` | Every 1s | Previous focused pane ID (for detecting focus changes) |
@@ -202,6 +225,18 @@ enum BottomPanel { Activity, Git }
 enum PaneStatus { Running, Background, Waiting, Idle, Error, Unknown }
 enum AgentType { Claude, Codex, OpenCode, Unknown }
 enum PermissionMode { Default, Plan, AcceptEdits, Auto, DontAsk, BypassPermissions, Defer }
+enum PaneAttentionKind { ActionRequired, Completed }
+
+struct PaneAttention {
+    kind: PaneAttentionKind,
+    event_id: String,
+    raw_value: String,
+}
+
+struct PaneInfo {
+    // Other pane metadata omitted.
+    attention: Option<PaneAttention>,
+}
 
 /// At-most-one popup state. The enum encodes both which popup is open
 /// and its per-popup data so the invariant is checked by the type system.
