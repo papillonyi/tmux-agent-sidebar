@@ -505,6 +505,7 @@ mod tests {
     fn clear_pane_option_if_value_preserves_newer_mock_value() {
         let _guard = test_mock::install();
         test_mock::set("%1", PANE_ATTENTION, "action_required:2-2");
+        apply_pane_attention_style("%1", "colour22");
 
         assert!(!clear_pane_option_if_value(
             "%1",
@@ -515,6 +516,11 @@ mod tests {
             test_mock::get("%1", PANE_ATTENTION).as_deref(),
             Some("action_required:2-2")
         );
+        assert!(test_mock::contains("%1", PANE_ATTENTION_PREV_WINDOW_STYLE));
+        assert_eq!(
+            test_mock::get("%1", "window-style").as_deref(),
+            Some("bg=colour22")
+        );
     }
 
     #[test]
@@ -524,6 +530,14 @@ mod tests {
         assert_eq!(normalize_pane_attention_color(Some("005F00")), "#005F00");
         assert_eq!(normalize_pane_attention_color(Some("invalid")), "colour22");
         assert_eq!(normalize_pane_attention_color(None), "colour22");
+    }
+
+    #[test]
+    fn pane_attention_background_uses_completed_theme_override() {
+        let _guard = test_mock::install();
+        test_mock::set_global(SIDEBAR_COLOR_ATTENTION_COMPLETED_BG, "53");
+
+        assert_eq!(pane_attention_background(), "colour53");
     }
 
     #[test]
@@ -566,6 +580,19 @@ mod tests {
         assert_eq!(
             test_mock::get("%1", "window-active-style").as_deref(),
             Some("fg=yellow,bold")
+        );
+    }
+
+    #[test]
+    fn attention_style_restore_without_backup_preserves_user_style() {
+        let _guard = test_mock::install();
+        test_mock::set("%1", "window-style", "fg=white,bg=blue");
+
+        restore_pane_attention_style("%1");
+
+        assert_eq!(
+            test_mock::get("%1", "window-style").as_deref(),
+            Some("fg=white,bg=blue")
         );
     }
 

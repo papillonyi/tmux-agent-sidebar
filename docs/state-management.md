@@ -24,13 +24,17 @@ rest of the sidebar:
 | Tmux Variable | Default | Description |
 |---------------|---------|-------------|
 | `@sidebar_color_attention_action_bg` | xterm-256 index `58` | Full-card background for an unseen action-required event |
-| `@sidebar_color_attention_completed_bg` | xterm-256 index `22` | Full-card background for an unseen completed-turn event |
+| `@sidebar_color_attention_completed_bg` | xterm-256 index `22` | Full-card background for an unseen completed-turn event; also supplies the actual-pane attention background |
 
 Both options also accept six-digit RGB values through the normal theme parser.
+The actual tmux pane uses the completed color for both attention kinds, so it
+acts as one generic "this pane needs attention" signal while the Sidebar card
+continues to distinguish action-required and completed events.
 
 ### Per-pane State (keyed by pane ID)
 
-Written by `cli/hook.rs` on agent events, read by `query_sessions()` every **1 second**.
+Written by agent hooks and refresh/cleanup helpers, then read by
+`query_sessions()` every **1 second**.
 
 Each pane's runtime data is split into two buckets:
 
@@ -51,6 +55,8 @@ Pane options written to tmux:
 | `@pane_prompt_source` | UserPromptSubmit, Stop | "user" or "response" |
 | `@pane_started_at` | UserPromptSubmit | Unix epoch when agent started |
 | `@pane_attention` | Attention/completion hooks (set); activity, teardown, or observed pane focus (clear) | Unseen event encoded as `action_required:<event-id>` or `completed:<event-id>` |
+| `@pane_attention_prev_window_style` | Sidebar refresh (set); attention clear or teardown (clear) | Internal backup of the pane's explicit `window-style`; a sentinel records that the option originally inherited its value |
+| `@pane_attention_prev_window_active_style` | Sidebar refresh (set); attention clear or teardown (clear) | Internal backup of the pane's explicit `window-active-style` |
 | `@pane_wait_reason` | StopFailure, PermissionDenied, TeammateIdle | Reason for waiting/error (`permission_denied`, `teammate_idle:<name>`, or error text) |
 | `@pane_bg_cmd` | ActivityLog (bg Bash), Refresh sweep (clear), SessionEnd (clear) | Latest sanitized command of a Bash tool started with `run_in_background`. Its presence is the single source of truth for "live bg shell" — Stop routes to `background` while it is set, and the row body renders the command. Persists across UserPromptSubmit so shells spanning turns stay visible; overwritten by the next bg Bash. The refresh loop runs a `ps`-based liveness sweep each tick and clears the marker (plus downgrades `background → idle`) when no process matches the stored command. Only the most recent bg Bash is tracked; older ones are not retained. |
 | `@pane_subagents` | SubagentStart/Stop | Comma-separated `Type:id;started_at=<epoch-seconds>` active subagent list; legacy `Type` and `Type:id` entries remain readable |
@@ -71,6 +77,20 @@ active by the current tmux focus query. It does not use the sticky
 stable Git and Activity panels. Acknowledgement compare-and-clears the exact raw
 event value from the snapshot, so a newer hook event cannot be erased by an
 older focus observation.
+
+After focus acknowledgement, the same refresh reconciles actual pane styles.
+Any remaining pane with unseen attention receives the completed-card green
+background on both `window-style` and `window-active-style`, regardless of
+whether the event is action-required or completed. The first application saves
+the pane's explicit styles; clearing attention restores those values or removes
+the temporary override when the pane originally inherited its styles. Ordinary
+attention clears restore immediately, and the `list-panes` snapshot also
+detects a stale backup without attention so a restarted Sidebar repairs it.
+Agent teardown clears `@pane_attention` through the same restoration path.
+
+Tmux styles affect cells that use the terminal's default background. A
+full-screen terminal application may explicitly paint some or all cells and
+visually cover this highlight; the Sidebar does not rewrite pane output.
 
 In-memory per-pane runtime state. Every field lives inside
 `PaneRuntimeState` so the whole record is dropped together when its
