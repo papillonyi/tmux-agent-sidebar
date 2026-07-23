@@ -81,12 +81,18 @@ pub(super) fn render_pane_lines_with_runtime(
     now: u64,
 ) -> Vec<Line<'static>> {
     let focus_enclosure = has_focus_enclosure(pane, active, width);
-    let bg = if selected {
-        Some(theme.selection_bg)
-    } else {
-        None
+    let attention_bg = pane
+        .attention
+        .as_ref()
+        .map(|attention| theme.attention_bg(attention.kind));
+    let attention_selected = selected && attention_bg.is_some();
+    let marker_bg = attention_bg.or_else(|| selected.then_some(theme.selection_bg));
+    let body_bg = attention_bg;
+    let apply_marker_bg = |style: Style| match marker_bg {
+        Some(c) => style.bg(c),
+        None => style,
     };
-    let apply_bg = |style: Style| match bg {
+    let apply_body_bg = |style: Style| match body_bg {
         Some(c) => style.bg(c),
         None => style,
     };
@@ -98,22 +104,27 @@ pub(super) fn render_pane_lines_with_runtime(
     // sidebar cursor position (`selected`) remains a separate background
     // treatment.
     let marker_ctx = RowCtx {
-        marker_char: if active { SELECTION_MARKER } else { " " },
-        marker_style: if focus_enclosure {
-            apply_bg(enclosure_style)
-        } else if active {
-            apply_bg(Style::default().fg(theme.accent))
+        marker_char: if active || attention_selected {
+            SELECTION_MARKER
         } else {
-            apply_bg(Style::default())
+            " "
+        },
+        marker_style: if focus_enclosure {
+            apply_marker_bg(enclosure_style)
+        } else if active || attention_selected {
+            apply_marker_bg(Style::default().fg(theme.accent))
+        } else {
+            apply_marker_bg(Style::default())
         },
         inner_width: if focus_enclosure {
             framed_inner_width
         } else {
             plain_inner_width
         },
-        right_border: focus_enclosure.then_some((SELECTION_MARKER, apply_bg(enclosure_style))),
+        right_border: focus_enclosure
+            .then_some((SELECTION_MARKER, apply_marker_bg(enclosure_style))),
         theme,
-        bg,
+        bg: marker_bg,
         active,
     };
     let plain_ctx = RowCtx {
@@ -123,18 +134,18 @@ pub(super) fn render_pane_lines_with_runtime(
             " "
         },
         marker_style: if focus_enclosure {
-            enclosure_style
+            apply_body_bg(enclosure_style)
         } else {
-            Style::default()
+            apply_body_bg(Style::default())
         },
         inner_width: if focus_enclosure {
             framed_inner_width
         } else {
             plain_inner_width
         },
-        right_border: focus_enclosure.then_some((SELECTION_MARKER, enclosure_style)),
+        right_border: focus_enclosure.then_some((SELECTION_MARKER, apply_body_bg(enclosure_style))),
         theme,
-        bg: None,
+        bg: body_bg,
         active,
     };
 

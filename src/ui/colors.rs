@@ -1,6 +1,6 @@
 use ratatui::style::Color;
 
-use crate::tmux::{self, AgentType, PaneStatus};
+use crate::tmux::{self, AgentType, PaneAttentionKind, PaneStatus};
 
 /// Runtime color theme, loaded from tmux @sidebar_color_* variables on startup.
 /// Overrides may be xterm-256 indexes or six-digit RGB hex values.
@@ -32,6 +32,8 @@ pub struct ColorTheme {
     pub port: Color,
     pub wait_reason: Color,
     pub selection_bg: Color,
+    pub attention_action_bg: Color,
+    pub attention_completed_bg: Color,
     pub branch: Color,
     pub badge_danger: Color,
     pub badge_auto: Color,
@@ -72,6 +74,8 @@ impl Default for ColorTheme {
             port: Color::Indexed(246),
             wait_reason: Color::Indexed(221),
             selection_bg: Color::Indexed(239),
+            attention_action_bg: Color::Indexed(58),
+            attention_completed_bg: Color::Indexed(22),
             branch: Color::Indexed(109),
             badge_danger: Color::Indexed(167),
             badge_auto: Color::Indexed(221),
@@ -128,6 +132,14 @@ impl ColorTheme {
         theme.port = read(tmux::SIDEBAR_COLOR_PORT, theme.port);
         theme.wait_reason = read(tmux::SIDEBAR_COLOR_WAIT_REASON, theme.wait_reason);
         theme.selection_bg = read(tmux::SIDEBAR_COLOR_SELECTION, theme.selection_bg);
+        theme.attention_action_bg = read(
+            tmux::SIDEBAR_COLOR_ATTENTION_ACTION_BG,
+            theme.attention_action_bg,
+        );
+        theme.attention_completed_bg = read(
+            tmux::SIDEBAR_COLOR_ATTENTION_COMPLETED_BG,
+            theme.attention_completed_bg,
+        );
         theme.branch = read(tmux::SIDEBAR_COLOR_BRANCH, theme.branch);
         theme.task_progress = read(tmux::SIDEBAR_COLOR_TASK_PROGRESS, theme.task_progress);
         theme.subagent = read(tmux::SIDEBAR_COLOR_SUBAGENT, theme.subagent);
@@ -146,10 +158,7 @@ impl ColorTheme {
         theme
     }
 
-    pub fn status_color(&self, status: &PaneStatus, attention: bool) -> Color {
-        if attention {
-            return self.status_waiting;
-        }
+    pub fn status_color(&self, status: &PaneStatus) -> Color {
         match status {
             PaneStatus::Running => self.status_running,
             PaneStatus::Background => self.status_running,
@@ -157,6 +166,20 @@ impl ColorTheme {
             PaneStatus::Idle => self.status_idle,
             PaneStatus::Error => self.status_error,
             PaneStatus::Unknown => self.status_unknown,
+        }
+    }
+
+    pub fn attention_bg(&self, kind: PaneAttentionKind) -> Color {
+        match kind {
+            PaneAttentionKind::ActionRequired => self.attention_action_bg,
+            PaneAttentionKind::Completed => self.attention_completed_bg,
+        }
+    }
+
+    pub fn attention_fg(&self, kind: PaneAttentionKind) -> Color {
+        match kind {
+            PaneAttentionKind::ActionRequired => self.status_waiting,
+            PaneAttentionKind::Completed => self.status_idle,
         }
     }
 
@@ -195,20 +218,23 @@ mod tests {
     use ratatui::style::Color;
 
     #[test]
-    fn status_color_attention_overrides() {
+    fn attention_colors_are_semantic() {
         let theme = ColorTheme::default();
-        // attention=true should always return status_waiting regardless of status
         assert_eq!(
-            theme.status_color(&PaneStatus::Idle, true),
+            theme.attention_bg(PaneAttentionKind::ActionRequired),
+            Color::Indexed(58)
+        );
+        assert_eq!(
+            theme.attention_bg(PaneAttentionKind::Completed),
+            Color::Indexed(22)
+        );
+        assert_eq!(
+            theme.attention_fg(PaneAttentionKind::ActionRequired),
             theme.status_waiting
         );
         assert_eq!(
-            theme.status_color(&PaneStatus::Running, true),
-            theme.status_waiting
-        );
-        assert_eq!(
-            theme.status_color(&PaneStatus::Error, true),
-            theme.status_waiting
+            theme.attention_fg(PaneAttentionKind::Completed),
+            theme.status_idle
         );
     }
 
@@ -216,23 +242,17 @@ mod tests {
     fn status_color_normal() {
         let theme = ColorTheme::default();
         assert_eq!(
-            theme.status_color(&PaneStatus::Running, false),
+            theme.status_color(&PaneStatus::Running),
             Color::Indexed(114)
         );
         assert_eq!(
-            theme.status_color(&PaneStatus::Waiting, false),
+            theme.status_color(&PaneStatus::Waiting),
             Color::Indexed(221)
         );
+        assert_eq!(theme.status_color(&PaneStatus::Idle), Color::Indexed(110));
+        assert_eq!(theme.status_color(&PaneStatus::Error), Color::Indexed(167));
         assert_eq!(
-            theme.status_color(&PaneStatus::Idle, false),
-            Color::Indexed(110)
-        );
-        assert_eq!(
-            theme.status_color(&PaneStatus::Error, false),
-            Color::Indexed(167)
-        );
-        assert_eq!(
-            theme.status_color(&PaneStatus::Unknown, false),
+            theme.status_color(&PaneStatus::Unknown),
             Color::Indexed(244)
         );
     }
@@ -289,5 +309,23 @@ mod tests {
         assert_eq!(theme.accent, default_theme.accent);
         assert_eq!(theme.agent_claude, default_theme.agent_claude);
         assert_eq!(theme.border_inactive, default_theme.border_inactive);
+    }
+
+    #[test]
+    fn from_options_reads_attention_backgrounds() {
+        let mut options = std::collections::HashMap::new();
+        options.insert(
+            tmux::SIDEBAR_COLOR_ATTENTION_ACTION_BG.to_string(),
+            "94".to_string(),
+        );
+        options.insert(
+            tmux::SIDEBAR_COLOR_ATTENTION_COMPLETED_BG.to_string(),
+            "#123456".to_string(),
+        );
+
+        let theme = ColorTheme::from_options(&options);
+
+        assert_eq!(theme.attention_action_bg, Color::Indexed(94));
+        assert_eq!(theme.attention_completed_bg, Color::Rgb(0x12, 0x34, 0x56));
     }
 }

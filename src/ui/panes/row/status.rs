@@ -18,9 +18,15 @@ pub(super) fn status_row(
     use crate::tmux::PermissionMode;
     let theme = ctx.theme;
 
-    let (icon, pulse_color) = running_icon_for(&pane.status, spinner_frame, icons);
-    let icon_color =
-        pulse_color.unwrap_or_else(|| theme.status_color(&pane.status, pane.attention.is_some()));
+    let (icon, icon_color) = if let Some(attention) = pane.attention.as_ref() {
+        (attention.kind.icon(), theme.attention_fg(attention.kind))
+    } else {
+        let (icon, pulse_color) = running_icon_for(&pane.status, spinner_frame, icons);
+        (
+            icon,
+            pulse_color.unwrap_or_else(|| theme.status_color(&pane.status)),
+        )
+    };
     let title_raw: &str = if pane.session_name.is_empty() {
         pane.agent.label()
     } else {

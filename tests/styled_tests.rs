@@ -4,7 +4,7 @@ mod test_helpers;
 use test_helpers::*;
 use tmux_agent_sidebar::activity::ActivityEntry;
 use tmux_agent_sidebar::state::{BottomPanel, Focus};
-use tmux_agent_sidebar::tmux::{AgentType, PaneStatus, SessionInfo, WindowInfo};
+use tmux_agent_sidebar::tmux::{AgentType, PaneAttention, PaneStatus, SessionInfo, WindowInfo};
 
 // ─── Styled Snapshot Tests for Selection and Focus ─────────────────
 
@@ -35,6 +35,79 @@ fn snapshot_selected_focused_styled() {
     p[fg:153]r[fg:153]o[fg:153]j[fg:153]e[fg:153]c[fg:153]t[fg:153]
     ┃[fg:153,bg:239] [bg:239]○[fg:110,bg:239] [fg:174,bg:239]c[fg:174,bg:239]l[fg:174,bg:239]a[fg:174,bg:239]u[fg:174,bg:239]d[fg:174,bg:239]e[fg:174,bg:239] [bg:239] [bg:239] [bg:239] [bg:239] [bg:239] [bg:239] [bg:239] [bg:239] [bg:239] [bg:239] [bg:239] [bg:239] [bg:239] [bg:239] [bg:239] [bg:239] [bg:239] [bg:239]
        [fg:255] [fg:255]W[fg:255]a[fg:255]i[fg:255]t[fg:255]i[fg:255]n[fg:255]g[fg:255] [fg:255]f[fg:255]o[fg:255]r[fg:255] [fg:255]p[fg:255]r[fg:255]o[fg:255]m[fg:255]p[fg:255]t[fg:255]…[fg:255]
+    ");
+}
+
+#[test]
+fn snapshot_attention_action_selected_full_card_styled() {
+    let mut pane = make_pane(AgentType::Claude, PaneStatus::Waiting);
+    pane.attention = PaneAttention::parse("action_required:1-1");
+    pane.wait_reason = "permission_denied".into();
+    pane.prompt = "Allow cargo test?".into();
+
+    let mut state = make_state(vec![]);
+    state.repo_groups = vec![make_repo_group("project", vec![pane])];
+    state.rebuild_row_targets();
+    state.focus_state.sidebar_focused = true;
+    state.focus_state.focus = Focus::Panes;
+    state.focus_state.focused_pane_id = None;
+    state.global.selected_pane_row = 0;
+    state.bottom_panel_height = 0;
+
+    insta::assert_snapshot!(render_to_styled_string(&mut state, 32, 12), @"
+     ≡[fg:111]1[fg:255]  ●[fg:245]0[fg:245]  ◎[fg:245]0[fg:245]  ◐[fg:245]1[fg:255]  ○[fg:245]0[fg:245]  ✕[fg:245]0[fg:245]
+    ⓘ[fg:221]                            —[fg:252] ▾[fg:252]
+    p[fg:255]r[fg:255]o[fg:255]j[fg:255]e[fg:255]c[fg:255]t[fg:255]
+    ┃[fg:153,bg:58] [bg:58]![fg:221,bg:58] [fg:174,bg:58]c[fg:174,bg:58]l[fg:174,bg:58]a[fg:174,bg:58]u[fg:174,bg:58]d[fg:174,bg:58]e[fg:174,bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58]
+     [bg:58] [bg:58] [fg:221,bg:58] [fg:221,bg:58]p[fg:221,bg:58]e[fg:221,bg:58]r[fg:221,bg:58]m[fg:221,bg:58]i[fg:221,bg:58]s[fg:221,bg:58]s[fg:221,bg:58]i[fg:221,bg:58]o[fg:221,bg:58]n[fg:221,bg:58] [fg:221,bg:58]d[fg:221,bg:58]e[fg:221,bg:58]n[fg:221,bg:58]i[fg:221,bg:58]e[fg:221,bg:58]d[fg:221,bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58]
+     [bg:58] [bg:58] [fg:244,bg:58] [fg:244,bg:58]A[fg:244,bg:58]l[fg:244,bg:58]l[fg:244,bg:58]o[fg:244,bg:58]w[fg:244,bg:58] [fg:244,bg:58]c[fg:244,bg:58]a[fg:244,bg:58]r[fg:244,bg:58]g[fg:244,bg:58]o[fg:244,bg:58] [fg:244,bg:58]t[fg:244,bg:58]e[fg:244,bg:58]s[fg:244,bg:58]t[fg:244,bg:58]?[fg:244,bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58]
+    ");
+}
+
+#[test]
+fn snapshot_attention_completed_codex_full_card_styled() {
+    let mut pane = make_pane(AgentType::Codex, PaneStatus::Idle);
+    pane.attention = PaneAttention::parse("completed:2-2");
+    pane.prompt = "All tests pass.".into();
+    pane.prompt_is_response = true;
+
+    let mut state = make_state(vec![]);
+    state.repo_groups = vec![make_repo_group("project", vec![pane])];
+    state.rebuild_row_targets();
+    state.focus_state.sidebar_focused = true;
+    state.focus_state.focus = Focus::BottomPanel;
+    state.focus_state.focused_pane_id = None;
+    state.bottom_panel_height = 0;
+
+    insta::assert_snapshot!(render_to_styled_string(&mut state, 32, 12), @"
+     ≡[fg:111]1[fg:255]  ●[fg:245]0[fg:245]  ◎[fg:245]0[fg:245]  ◐[fg:245]0[fg:245]  ○[fg:245]1[fg:255]  ✕[fg:245]0[fg:245]
+    ⓘ[fg:221]                            —[fg:252] ▾[fg:252]
+    p[fg:255]r[fg:255]o[fg:255]j[fg:255]e[fg:255]c[fg:255]t[fg:255]
+     [bg:22] [bg:22]✓[fg:110,bg:22] [fg:141,bg:22]c[fg:141,bg:22]o[fg:141,bg:22]d[fg:141,bg:22]e[fg:141,bg:22]x[fg:141,bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22]
+     [bg:22] [bg:22]▷[fg:81,bg:22,bold] [fg:81,bg:22,bold]A[fg:244,bg:22]l[fg:244,bg:22]l[fg:244,bg:22] [fg:244,bg:22]t[fg:244,bg:22]e[fg:244,bg:22]s[fg:244,bg:22]t[fg:244,bg:22]s[fg:244,bg:22] [fg:244,bg:22]p[fg:244,bg:22]a[fg:244,bg:22]s[fg:244,bg:22]s[fg:244,bg:22].[fg:244,bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22] [bg:22]
+    ");
+}
+
+#[test]
+fn snapshot_attention_action_opencode_full_card_styled() {
+    let mut pane = make_pane(AgentType::OpenCode, PaneStatus::Waiting);
+    pane.attention = PaneAttention::parse("action_required:3-3");
+    pane.wait_reason = "permission".into();
+
+    let mut state = make_state(vec![]);
+    state.repo_groups = vec![make_repo_group("project", vec![pane])];
+    state.rebuild_row_targets();
+    state.focus_state.sidebar_focused = true;
+    state.focus_state.focus = Focus::BottomPanel;
+    state.focus_state.focused_pane_id = None;
+    state.bottom_panel_height = 0;
+
+    insta::assert_snapshot!(render_to_styled_string(&mut state, 32, 12), @"
+     ≡[fg:111]1[fg:255]  ●[fg:245]0[fg:245]  ◎[fg:245]0[fg:245]  ◐[fg:245]1[fg:255]  ○[fg:245]0[fg:245]  ✕[fg:245]0[fg:245]
+    ⓘ[fg:221]                            —[fg:252] ▾[fg:252]
+    p[fg:255]r[fg:255]o[fg:255]j[fg:255]e[fg:255]c[fg:255]t[fg:255]
+     [bg:58] [bg:58]![fg:221,bg:58] [fg:117,bg:58]o[fg:117,bg:58]p[fg:117,bg:58]e[fg:117,bg:58]n[fg:117,bg:58]c[fg:117,bg:58]o[fg:117,bg:58]d[fg:117,bg:58]e[fg:117,bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58]
+     [bg:58] [bg:58] [fg:221,bg:58] [fg:221,bg:58]p[fg:221,bg:58]e[fg:221,bg:58]r[fg:221,bg:58]m[fg:221,bg:58]i[fg:221,bg:58]s[fg:221,bg:58]s[fg:221,bg:58]i[fg:221,bg:58]o[fg:221,bg:58]n[fg:221,bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58] [bg:58]
     ");
 }
 

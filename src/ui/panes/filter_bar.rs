@@ -14,7 +14,7 @@ pub(super) fn render_filter_bar<'a>(state: &AppState) -> Line<'a> {
     let icons = &state.icons;
     let (all, running, background, waiting, idle, error) = state.status_counts();
 
-    let icon_for = |s: PaneStatus| (icons.status_icon(&s), theme.status_color(&s, false));
+    let icon_for = |s: PaneStatus| (icons.status_icon(&s), theme.status_color(&s));
     let items: Vec<(StatusFilter, (&str, ratatui::style::Color), usize)> = vec![
         (StatusFilter::All, (icons.all_icon(), theme.status_all), all),
         (

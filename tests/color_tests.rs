@@ -20,6 +20,8 @@ fn test_all_color_theme_defaults() {
     assert_eq!(theme.accent, Color::Indexed(153));
     assert_eq!(theme.border_inactive, Color::Indexed(240));
     assert_eq!(theme.selection_bg, Color::Indexed(239));
+    assert_eq!(theme.attention_action_bg, Color::Indexed(58));
+    assert_eq!(theme.attention_completed_bg, Color::Indexed(22));
 
     // Status colors
     assert_eq!(theme.status_all, Color::Indexed(111));
@@ -65,46 +67,33 @@ fn test_status_color_all_variants() {
     let theme = ColorTheme::default();
 
     assert_eq!(
-        theme.status_color(&PaneStatus::Running, false),
+        theme.status_color(&PaneStatus::Running),
         Color::Indexed(114)
     );
     assert_eq!(
-        theme.status_color(&PaneStatus::Waiting, false),
+        theme.status_color(&PaneStatus::Waiting),
         Color::Indexed(221)
     );
+    assert_eq!(theme.status_color(&PaneStatus::Idle), Color::Indexed(110));
+    assert_eq!(theme.status_color(&PaneStatus::Error), Color::Indexed(167));
     assert_eq!(
-        theme.status_color(&PaneStatus::Idle, false),
-        Color::Indexed(110)
-    );
-    assert_eq!(
-        theme.status_color(&PaneStatus::Error, false),
-        Color::Indexed(167)
-    );
-    assert_eq!(
-        theme.status_color(&PaneStatus::Unknown, false),
+        theme.status_color(&PaneStatus::Unknown),
         Color::Indexed(244)
     );
 }
 
 #[test]
-fn test_status_color_attention_overrides_all() {
+fn test_attention_colors_are_semantic() {
     let theme = ColorTheme::default();
 
-    // attention=true should always return status_waiting regardless of status
-    for status in &[
-        PaneStatus::Running,
-        PaneStatus::Waiting,
-        PaneStatus::Idle,
-        PaneStatus::Error,
-        PaneStatus::Unknown,
-    ] {
-        assert_eq!(
-            theme.status_color(status, true),
-            theme.status_waiting,
-            "attention=true should override {:?} to waiting color",
-            status
-        );
-    }
+    assert_eq!(
+        theme.attention_bg(tmux_agent_sidebar::tmux::PaneAttentionKind::ActionRequired),
+        Color::Indexed(58)
+    );
+    assert_eq!(
+        theme.attention_bg(tmux_agent_sidebar::tmux::PaneAttentionKind::Completed),
+        Color::Indexed(22)
+    );
 }
 
 // ─── agent_color() for all AgentType variants ───────────────────────
@@ -1125,7 +1114,7 @@ fn test_idle_status_color_in_output() {
 fn test_unknown_status_color_in_output() {
     let theme = tmux_agent_sidebar::ui::colors::ColorTheme::default();
     assert_eq!(
-        theme.status_color(&PaneStatus::Unknown, false),
+        theme.status_color(&PaneStatus::Unknown),
         ratatui::style::Color::Indexed(244)
     );
 }
