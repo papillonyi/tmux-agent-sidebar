@@ -37,12 +37,13 @@ Each pane's core runtime record is split across two storage buckets:
 | Source | Update Trigger | Description |
 |--------|----------------|-------------|
 | tmux pane options | Event-driven + cleanup on agent exit | Agent type, status, cwd, permission mode, prompt, subagents, worktree, etc. |
-| `PaneRuntimeState` in `AppState` | Refresh cycle + cleanup on agent exit | `ports`, `command`, `task_progress`, Codex token usage/tracker, `task_dismissed_total`, `inactive_since` |
+| `PaneRuntimeState` in `AppState` | Refresh cycle + cleanup on agent exit | `ports`, `command`, `task_progress`, Codex token usage/tracker, normalized Codex `AgentRecord` rows, `task_dismissed_total`, `inactive_since` |
 
 Codex agent rows additionally merge three distinct file inputs: the parent
 Codex rollout, discovered per-child Codex rollouts, and the plugin-owned
-lifecycle journal. These inputs enrich `PaneRuntimeState`; they are not
-additional pane-record storage buckets.
+lifecycle journal. `CodexAgentTracker` adapts these inputs into
+`Vec<AgentRecord>` before they enter `PaneRuntimeState`; the Sidebar never
+parses rollout fields or selects between hook and rollout labels.
 
 Pane options written to tmux:
 
@@ -62,7 +63,7 @@ Pane options written to tmux:
 | `@pane_worktree_name` | SessionStart | Worktree name (if applicable) |
 | `@pane_worktree_branch` | SessionStart | Worktree branch (if applicable) |
 | `@pane_session_id` | SessionStart, UserPromptSubmit, Notification, Stop, StopFailure, PermissionDenied, CwdChanged | Agent-reported session id (skipped when subagents are active) |
-| `@pane_transcript_path` | Parent Codex events only (`SubagentStart`/`SubagentStop` explicitly excluded); cleared on a SessionStart without a path and on agent exit | Agent-reported rollout JSONL path used for best-effort token usage reads |
+| `@pane_transcript_path` | Parent Codex events only (`SubagentStart`/`SubagentStop` explicitly excluded); cleared on a SessionStart without a path and on agent exit | Agent-reported parent rollout JSONL path used for best-effort token usage and normalized child-agent reads |
 
 `Notification`, `PermissionDenied`, and `TeammateIdle` write a fresh
 `action_required` event. A normal `Stop` writes `completed` only when no live
@@ -92,16 +93,16 @@ pane disappears (`prune_pane_states_to_current_panes`).
 | `pane_states.map[...].task_progress_log_mtime` | Every 1s (refresh cycle) | mtime of the task-progress log last parsed; skips re-parsing when unchanged |
 | `pane_states.map[...].codex_token_usage` | Every 1s (refresh cycle) | Latest cumulative token count, last-call context footprint, and model context window parsed from a Codex `token_count` event |
 | `pane_states.map[...].codex_usage_tracker` | Every 1s (refresh cycle) | Transcript path, mtime, byte offset, and partial-line buffer used to read only appended Codex JSONL data; first read is limited to the last 256 KiB |
-| `pane_states.map[...].codex_agents` | Every 1s (refresh cycle) | Merged `/agent`-style rows refreshed from the parent and per-child Codex rollouts plus the lifecycle journal |
-| `pane_states.map[...].codex_agent_tracker` | Every 1s (refresh cycle) | Parent and child rollout paths/cursors; child `session_meta` validation state; cached lifecycle transitions; bounded child-rollout discovery retry state; and the lifecycle-journal cursor/cache |
+| `pane_states.map[...].codex_agents` | Every 1s (refresh cycle) | Normalized `Vec<AgentRecord>` refreshed from the parent and per-child Codex rollouts plus the lifecycle journal. `display_name` is ready for rendering; `internal_id` is retained only for correlation and is not rendered. |
+| `pane_states.map[...].codex_agent_tracker` | Every 1s (refresh cycle) | Source adapter and merge state: parent and child rollout paths/cursors; validated child path/nickname metadata; cached lifecycle transitions; bounded child-rollout discovery retry state; and the lifecycle-journal cursor/cache |
 
 Per-pane file-based state:
 
 | File | Update Trigger | Read Frequency | Description |
 |------|---------------|----------------|-------------|
 | `/tmp/tmux-agent-activity_{pane_id}.log` | Each ActivityLog event | Every 1s | Tool usage log (`HH:MM\|tool\|label`), max 200 lines |
-| Parent Codex rollout JSONL at `@pane_transcript_path` | Codex process | Every 1s (mtime/offset gated) | Best-effort source for cumulative token usage, context percentage, child catalog/order, interruption events, and successful closes. Codex documents `transcript_path` in hook input, but the transcript record schema is not a stable interface; missing or malformed records are ignored. |
-| Discovered per-child Codex rollout JSONL files | Codex process | Every 1s (offset gated after bounded discovery retries) | Validated against the child id, parent session, and child `session_meta`; supplies child task-started, completed, and interrupted lifecycle transitions, including for journal-only child ids. |
+| Parent Codex rollout JSONL at `@pane_transcript_path` | Codex process | Every 1s (mtime/offset gated) | Best-effort source for cumulative token usage, context percentage, canonical child path/order, interruption events, and successful closes. Codex documents `transcript_path` in hook input, but the transcript record schema is not a stable interface; missing or malformed records are ignored. |
+| Discovered per-child Codex rollout JSONL files | Codex process | Every 1s (offset gated after bounded discovery retries) | Validated against the child id, parent session, and child `session_meta`; supplies child path/nickname enrichment plus task-started, completed, and interrupted lifecycle transitions, including for journal-only child ids. |
 | `/tmp/tmux-agent-agents_{pane_id}.jsonl` | Codex SubagentStart/Stop hooks | Every 1s (offset gated) | Lifecycle journal for retained Codex child states. Records are folded only when their parent session id matches the pane's current `@pane_session_id`, so stale records are isolated before cleanup. |
 
 Normal metadata teardown, dead-process cleanup, and the shell fallback remove
@@ -217,6 +218,7 @@ TUI main loop (app::run in app.rs; submodules app/{setup,workers,input,render})
     → refresh_activity_data()        ← reads /tmp activity logs
     → refresh_task_progress()        ← updates PaneRuntimeState.task_progress
     → refresh_codex_token_usage()    ← incrementally reads Codex rollout JSONL
+    → refresh_codex_agents()         ← adapts hook + rollout inputs into AgentRecord rows
     → refresh_port_data()            ← updates PaneRuntimeState.ports
     → scan_session_process_snapshot() ← detects dead panes and clears stale tmux metadata
                         ↓

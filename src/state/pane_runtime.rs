@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::AppState;
 use crate::activity::TaskProgress;
-use crate::codex_agents::{CodexAgentInfo, CodexAgentTracker};
+use crate::codex_agents::{AgentRecord, CodexAgentTracker};
 use crate::codex_usage::{CodexTokenUsage, CodexUsageTracker};
 use crate::state::BottomPanel;
 
@@ -19,7 +19,7 @@ pub struct PaneRuntimeState {
     pub codex_token_usage: Option<CodexTokenUsage>,
     /// File cursor and partial-line buffer used by the one-second refresh loop.
     pub(crate) codex_usage_tracker: CodexUsageTracker,
-    pub codex_agents: Vec<CodexAgentInfo>,
+    pub codex_agents: Vec<AgentRecord>,
     pub(crate) codex_agent_tracker: CodexAgentTracker,
     /// Last bottom panel the user selected while this pane was focused.
     /// `None` until the active panel changes at least once. Cleaned up
@@ -108,11 +108,11 @@ impl AppState {
             .and_then(|state| state.codex_token_usage.as_ref())
     }
 
-    pub fn set_pane_codex_agents(&mut self, pane_id: &str, agents: Vec<CodexAgentInfo>) {
+    pub fn set_pane_codex_agents(&mut self, pane_id: &str, agents: Vec<AgentRecord>) {
         self.pane_state_mut(pane_id).codex_agents = agents;
     }
 
-    pub fn pane_codex_agents(&self, pane_id: &str) -> Option<&[CodexAgentInfo]> {
+    pub fn pane_codex_agents(&self, pane_id: &str) -> Option<&[AgentRecord]> {
         self.pane_state(pane_id)
             .map(|state| state.codex_agents.as_slice())
     }
@@ -260,7 +260,7 @@ mod tests {
     // ─── AppState accessors ──────────────────────────────────────────
 
     use crate::activity::TaskStatus;
-    use crate::codex_agents::{CodexAgentInfo, CodexAgentStatus};
+    use crate::codex_agents::{AgentRecord, AgentStatus};
 
     #[test]
     fn app_state_pane_accessors_round_trip_through_runtime_map() {
@@ -279,11 +279,10 @@ mod tests {
         state.set_pane_inactive_since(pane_id, Some(42));
         state.set_pane_codex_agents(
             pane_id,
-            vec![CodexAgentInfo {
-                id: "agent-full-id".into(),
-                path: "/root/task1_review".into(),
-                fallback_agent_type: "reviewer".into(),
-                status: CodexAgentStatus::Done,
+            vec![AgentRecord {
+                internal_id: "agent-full-id".into(),
+                display_name: "/root/task1_review".into(),
+                status: AgentStatus::Done,
                 started_at: Some(10),
                 finished_at: Some(25),
             }],
@@ -300,11 +299,10 @@ mod tests {
         assert_eq!(
             state.pane_codex_agents(pane_id),
             Some(
-                &[CodexAgentInfo {
-                    id: "agent-full-id".into(),
-                    path: "/root/task1_review".into(),
-                    fallback_agent_type: "reviewer".into(),
-                    status: CodexAgentStatus::Done,
+                &[AgentRecord {
+                    internal_id: "agent-full-id".into(),
+                    display_name: "/root/task1_review".into(),
+                    status: AgentStatus::Done,
                     started_at: Some(10),
                     finished_at: Some(25),
                 }][..]

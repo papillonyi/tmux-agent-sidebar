@@ -1,5 +1,9 @@
 # Codex Agent List Parity Design
 
+> Superseded for implementation boundaries and rendering by
+> `2026-07-24-normalized-codex-agent-state-design.md`. This document remains
+> as the detailed history of the original `/agent` parity exploration.
+
 ## Goal
 
 Make a Codex pane's sidebar agent tree match the useful semantics of Codex's

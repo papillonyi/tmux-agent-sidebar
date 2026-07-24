@@ -44,7 +44,7 @@ fn append_codex_lifecycle(
     parent_session_id: Option<&str>,
     agent_id: Option<&str>,
     agent_type: &str,
-    status: crate::codex_agents::CodexAgentStatus,
+    status: crate::codex_agents::AgentStatus,
 ) {
     if agent_name != crate::tmux::CODEX_AGENT {
         return;
@@ -198,7 +198,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
                 session_id.as_deref(),
                 agent_id.as_deref(),
                 &agent_type,
-                crate::codex_agents::CodexAgentStatus::Working,
+                crate::codex_agents::AgentStatus::Working,
             );
             handlers::on_subagent_start(pane, &agent_type, agent_id.as_deref())
         }
@@ -214,7 +214,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
                 session_id.as_deref(),
                 agent_id.as_deref(),
                 &agent_type,
-                crate::codex_agents::CodexAgentStatus::Done,
+                crate::codex_agents::AgentStatus::Done,
             );
             handlers::on_subagent_stop(pane, agent_id.as_deref())
         }
@@ -268,16 +268,12 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codex_agents::CodexAgentStatus;
+    use crate::codex_agents::AgentStatus;
     use crate::codex_agents::journal::{JournalTracker, journal_file_path, remove_journal};
     use crate::event::AgentEventKind;
     use crate::tmux;
 
-    fn journal_status(
-        pane: &str,
-        parent_session_id: &str,
-        agent_id: &str,
-    ) -> Option<CodexAgentStatus> {
+    fn journal_status(pane: &str, parent_session_id: &str, agent_id: &str) -> Option<AgentStatus> {
         let mut tracker = JournalTracker::default();
         tracker.set_context(pane, Some(parent_session_id));
         tracker.refresh().expect("refresh lifecycle journal");
@@ -367,7 +363,7 @@ mod tests {
         );
         assert_eq!(
             journal_status(pane, "parent-1", "agent-a"),
-            Some(CodexAgentStatus::Working)
+            Some(AgentStatus::Working)
         );
 
         assert_eq!(
@@ -386,7 +382,7 @@ mod tests {
         );
         assert_eq!(
             journal_status(pane, "parent-1", "agent-a"),
-            Some(CodexAgentStatus::Done)
+            Some(AgentStatus::Done)
         );
 
         remove_journal(pane);
@@ -431,7 +427,7 @@ mod tests {
 
         assert_eq!(
             journal_status(pane, "parent-stored", "agent-a"),
-            Some(CodexAgentStatus::Working)
+            Some(AgentStatus::Working)
         );
         remove_journal(pane);
     }

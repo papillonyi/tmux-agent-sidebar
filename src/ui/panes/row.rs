@@ -73,7 +73,7 @@ pub(super) fn render_pane_lines_with_runtime(
     ports: Option<&[u16]>,
     task_progress: Option<&crate::activity::TaskProgress>,
     token_usage: Option<&crate::codex_usage::CodexTokenUsage>,
-    codex_agents: Option<&[crate::codex_agents::CodexAgentInfo]>,
+    codex_agents: Option<&[crate::codex_agents::AgentRecord]>,
     selected: bool,
     active: bool,
     width: usize,
@@ -167,12 +167,7 @@ pub(super) fn render_pane_lines_with_runtime(
     }
     if pane.agent == AgentType::Codex {
         if let Some(agents) = codex_agents.filter(|agents| !agents.is_empty()) {
-            out.extend(codex_agent_rows(
-                pane.session_id.as_deref(),
-                agents,
-                ctx,
-                now,
-            ));
+            out.extend(codex_agent_rows(agents, ctx, now));
         } else {
             out.extend(subagent_rows(&pane.subagents, ctx, now));
         }
@@ -196,7 +191,7 @@ pub(super) fn render_pane_lines_with_runtime(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codex_agents::{CodexAgentInfo, CodexAgentStatus};
+    use crate::codex_agents::{AgentRecord, AgentStatus};
     use crate::group::PaneGitInfo;
     use crate::tmux::{AgentType, PaneInfo, PermissionMode, SubagentInfo, WorktreeMetadata};
     use crate::ui::icons::StatusIcons;
@@ -724,54 +719,50 @@ mod tests {
         let theme = ColorTheme::default();
         let ctx = test_ctx(&theme, 72, false);
         let agents = vec![
-            CodexAgentInfo {
-                id: "019f9260-1111-2222-3333-444444444444".into(),
-                path: "/root/task1_owner_contract".into(),
-                fallback_agent_type: "worker".into(),
-                status: CodexAgentStatus::Done,
+            AgentRecord {
+                internal_id: "019f9260-1111-2222-3333-444444444444".into(),
+                display_name: "/root/task1_owner_contract".into(),
+                status: AgentStatus::Done,
                 started_at: Some(100),
                 finished_at: Some(265),
             },
-            CodexAgentInfo {
-                id: "019f9264-1111-2222-3333-444444444444".into(),
-                path: "/root/task2_owner_propagation".into(),
-                fallback_agent_type: "worker".into(),
-                status: CodexAgentStatus::Working,
+            AgentRecord {
+                internal_id: "019f9264-1111-2222-3333-444444444444".into(),
+                display_name: "/root/task2_owner_propagation".into(),
+                status: AgentStatus::Working,
                 started_at: Some(200),
                 finished_at: None,
             },
-            CodexAgentInfo {
-                id: "019f9267-1111-2222-3333-444444444444".into(),
-                path: "/root/task2_review".into(),
-                fallback_agent_type: "reviewer".into(),
-                status: CodexAgentStatus::Interrupted,
+            AgentRecord {
+                internal_id: "019f9267-1111-2222-3333-444444444444".into(),
+                display_name: "/root/task2_review".into(),
+                status: AgentStatus::Interrupted,
                 started_at: Some(210),
                 finished_at: Some(280),
             },
-            CodexAgentInfo {
-                id: "019f9268-1111-2222-3333-444444444444".into(),
-                path: "/root/task3_builder".into(),
-                fallback_agent_type: "builder".into(),
-                status: CodexAgentStatus::Unknown,
+            AgentRecord {
+                internal_id: "019f9268-1111-2222-3333-444444444444".into(),
+                display_name: "/root/task3_builder".into(),
+                status: AgentStatus::Unknown,
                 started_at: None,
                 finished_at: None,
             },
         ];
 
-        let rows = body::codex_agent_rows(
-            Some("019f920c-bee2-7980-9ab1-0476552b63c8"),
-            &agents,
-            &ctx,
-            325,
-        );
-        let output = rows.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        let rows = body::codex_agent_rows(&agents, &ctx, 325);
+        let output = rows
+            .iter()
+            .map(line_text)
+            .map(|line| line.trim_end().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n");
 
         insta::assert_snapshot!(output, @"
-        ├ Main [default] (current)                                    019f920c
-        ├ /root/task1_owner_contract                    019f9260  ✓ done 2m45s
-        ├ /root/task2_owner_propagation               019f9264  ● working 2m5s
-        ├ /root/task2_review                           019f9267  ○ interrupted
-        └ /root/task3_builder                              019f9268  ? unknown
+        ├ Main [default] (current)
+        ├ /root/task1_owner_contract                              ✓ done 2m45s
+        ├ /root/task2_owner_propagation                         ● working 2m5s
+        ├ /root/task2_review                                     ○ interrupted
+        └ /root/task3_builder                                        ? unknown
         ");
         for (row_index, status, expected_color) in [
             (1, "✓ done", theme.status_idle),
@@ -789,29 +780,23 @@ mod tests {
     }
 
     #[test]
-    fn codex_agent_rows_drop_duration_before_id_status_and_truncate_path() {
+    fn codex_agent_rows_drop_duration_before_status_and_truncate_name() {
         let theme = ColorTheme::default();
-        let ctx = test_ctx(&theme, 25, false);
-        let agents = vec![CodexAgentInfo {
-            id: "019f9260-1111-2222-3333-444444444444".into(),
-            path: "/root/task1_owner_contract".into(),
-            fallback_agent_type: "worker".into(),
-            status: CodexAgentStatus::Done,
+        let ctx = test_ctx(&theme, 16, false);
+        let agents = vec![AgentRecord {
+            internal_id: "019f9260-1111-2222-3333-444444444444".into(),
+            display_name: "/root/task1_owner_contract".into(),
+            status: AgentStatus::Done,
             started_at: Some(100),
             finished_at: Some(265),
         }];
 
-        let rows = body::codex_agent_rows(
-            Some("019f920c-bee2-7980-9ab1-0476552b63c8"),
-            &agents,
-            &ctx,
-            325,
-        );
+        let rows = body::codex_agent_rows(&agents, &ctx, 325);
         let output = rows.iter().map(line_text).collect::<Vec<_>>().join("\n");
 
         insta::assert_snapshot!(output, @"
-        ├ Main [defau… 019f920c
-        └ /ro… 019f9260  ✓ done
+        ├ Main [defau…
+        └ /roo… ✓ done
         ");
     }
 
@@ -819,98 +804,79 @@ mod tests {
     fn codex_agent_rows_keep_main_label_cell_at_exact_boundary() {
         let theme = ColorTheme::default();
         let ctx = test_ctx(&theme, 13, false);
-        let agents = vec![CodexAgentInfo {
-            id: "019f9260-1111-2222-3333-444444444444".into(),
-            path: "worker".into(),
-            fallback_agent_type: "worker".into(),
-            status: CodexAgentStatus::Done,
+        let agents = vec![AgentRecord {
+            internal_id: "019f9260-1111-2222-3333-444444444444".into(),
+            display_name: "worker".into(),
+            status: AgentStatus::Done,
             started_at: None,
             finished_at: None,
         }];
 
-        let rows = body::codex_agent_rows(
-            Some("019f920c-bee2-7980-9ab1-0476552b63c8"),
-            &agents,
-            &ctx,
-            325,
-        );
+        let rows = body::codex_agent_rows(&agents, &ctx, 325);
         let output = line_text(&rows[0]);
 
-        insta::assert_snapshot!(output, @"    ├ …019f920c");
+        insta::assert_snapshot!(output, @"    ├ Main [de…");
     }
 
     #[test]
     fn codex_agent_rows_keep_wide_label_cell_at_exact_mandatory_boundary() {
         let theme = ColorTheme::default();
         let ctx = test_ctx(&theme, 21, false);
-        let agents = vec![CodexAgentInfo {
-            id: "019f9260-1111-2222-3333-444444444444".into(),
-            path: "工作路径".into(),
-            fallback_agent_type: "worker".into(),
-            status: CodexAgentStatus::Done,
+        let agents = vec![AgentRecord {
+            internal_id: "019f9260-1111-2222-3333-444444444444".into(),
+            display_name: "工作路径".into(),
+            status: AgentStatus::Done,
             started_at: None,
             finished_at: None,
         }];
 
-        let rows = body::codex_agent_rows(
-            Some("019f920c-bee2-7980-9ab1-0476552b63c8"),
-            &agents,
-            &ctx,
-            325,
-        );
+        let rows = body::codex_agent_rows(&agents, &ctx, 325);
         let output = line_text(&rows[1]);
 
-        insta::assert_snapshot!(output, @"    └ …019f9260  ✓ done");
+        insta::assert_snapshot!(output, @"    └ 工作路径   ✓ done");
     }
 
     #[test]
     fn codex_agent_rows_keep_duration_at_exact_no_gap_boundary() {
         let theme = ColorTheme::default();
         let ctx = test_ctx(&theme, 27, false);
-        let agents = vec![CodexAgentInfo {
-            id: "019f9260-1111-2222-3333-444444444444".into(),
-            path: "工作路径".into(),
-            fallback_agent_type: "worker".into(),
-            status: CodexAgentStatus::Done,
+        let agents = vec![AgentRecord {
+            internal_id: "019f9260-1111-2222-3333-444444444444".into(),
+            display_name: "工作路径".into(),
+            status: AgentStatus::Done,
             started_at: Some(100),
             finished_at: Some(265),
         }];
 
-        let rows = body::codex_agent_rows(
-            Some("019f920c-bee2-7980-9ab1-0476552b63c8"),
-            &agents,
-            &ctx,
-            325,
-        );
+        let rows = body::codex_agent_rows(&agents, &ctx, 325);
         let output = line_text(&rows[1]);
 
-        insta::assert_snapshot!(output, @"    └ …019f9260  ✓ done 2m45s");
+        insta::assert_snapshot!(output, @"    └ 工作路径   ✓ done 2m45s");
     }
 
     #[test]
-    fn codex_agent_rows_use_agent_type_for_hook_only_fallback() {
+    fn codex_agent_rows_use_normalized_hook_fallback_name() {
         let theme = ColorTheme::default();
         let ctx = test_ctx(&theme, 40, false);
-        let agents = vec![CodexAgentInfo {
-            id: "019f9264-1111-2222-3333-444444444444".into(),
-            path: String::new(),
-            fallback_agent_type: "worker".into(),
-            status: CodexAgentStatus::Working,
+        let agents = vec![AgentRecord {
+            internal_id: "019f9264-1111-2222-3333-444444444444".into(),
+            display_name: "worker".into(),
+            status: AgentStatus::Working,
             started_at: Some(200),
             finished_at: None,
         }];
 
-        let rows = body::codex_agent_rows(
-            Some("019f920c-bee2-7980-9ab1-0476552b63c8"),
-            &agents,
-            &ctx,
-            325,
-        );
-        let output = rows.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        let rows = body::codex_agent_rows(&agents, &ctx, 325);
+        let output = rows
+            .iter()
+            .map(line_text)
+            .map(|line| line.trim_end().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n");
 
         insta::assert_snapshot!(output, @"
-            ├ Main [default] (current)    019f920c
-            └ worker      019f9264  ● working 2m5s
+            ├ Main [default] (current)
+            └ worker                ● working 2m5s
         ");
     }
 

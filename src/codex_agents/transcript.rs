@@ -8,7 +8,7 @@ use std::time::SystemTime;
 use indexmap::IndexMap;
 use serde_json::Value;
 
-use super::CodexAgentStatus;
+use super::AgentStatus;
 
 const CONTENT_ANCHOR_BYTES: usize = 4 * 1024;
 const MAX_DISCOVERY_BACKOFF_TICKS: u64 = 30;
@@ -30,7 +30,7 @@ impl FileIdentity {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ChildLifecycleSnapshot {
-    pub status: CodexAgentStatus,
+    pub status: AgentStatus,
     pub started_at_ms: Option<u64>,
     pub finished_at_ms: Option<u64>,
     pub last_event_at_ms: u64,
@@ -48,6 +48,7 @@ struct ChildRolloutTracker {
     partial_line: Vec<u8>,
     content_anchor: Vec<u8>,
     validated: bool,
+    display_name: Option<String>,
     lifecycle: Option<ChildLifecycleSnapshot>,
 }
 
@@ -93,6 +94,7 @@ impl ChildRolloutTracker {
             partial_line: Vec::new(),
             content_anchor: Vec::new(),
             validated: false,
+            display_name: None,
             lifecycle: None,
         }
     }
@@ -161,6 +163,7 @@ impl ChildRolloutTracker {
         self.partial_line.clear();
         self.content_anchor.clear();
         self.validated = false;
+        self.display_name = None;
         self.lifecycle = None;
     }
 
@@ -193,7 +196,11 @@ impl ChildRolloutTracker {
         match record.get("type").and_then(Value::as_str) {
             Some("session_meta") => {
                 if !self.validated {
-                    self.validated = self.valid_session_meta(record.get("payload"));
+                    let payload = record.get("payload");
+                    self.validated = self.valid_session_meta(payload);
+                    if self.validated {
+                        self.display_name = child_display_name(payload);
+                    }
                 }
             }
             Some("event_msg") if self.validated => {
@@ -250,13 +257,13 @@ impl ChildRolloutTracker {
                 let Some(timestamp) = seconds_to_millis(payload.get("started_at")) else {
                     return;
                 };
-                (CodexAgentStatus::Working, timestamp)
+                (AgentStatus::Working, timestamp)
             }
             Some("task_complete") => {
                 let Some(timestamp) = seconds_to_millis(payload.get("completed_at")) else {
                     return;
                 };
-                (CodexAgentStatus::Done, timestamp)
+                (AgentStatus::Done, timestamp)
             }
             Some("turn_aborted")
                 if payload.get("reason").and_then(Value::as_str) == Some("interrupted") =>
@@ -264,7 +271,7 @@ impl ChildRolloutTracker {
                 let Some(timestamp) = seconds_to_millis(payload.get("completed_at")) else {
                     return;
                 };
-                (CodexAgentStatus::Interrupted, timestamp)
+                (AgentStatus::Interrupted, timestamp)
             }
             _ => return,
         };
@@ -285,8 +292,8 @@ impl ChildRolloutTracker {
             status,
             started_at_ms: event_started_at_ms.or(previous_started_at_ms),
             finished_at_ms: match status {
-                CodexAgentStatus::Done | CodexAgentStatus::Interrupted => Some(occurred_at_ms),
-                CodexAgentStatus::Working | CodexAgentStatus::Unknown => None,
+                AgentStatus::Done | AgentStatus::Interrupted => Some(occurred_at_ms),
+                AgentStatus::Working | AgentStatus::Unknown => None,
             },
             last_event_at_ms: occurred_at_ms,
         });
@@ -303,6 +310,27 @@ fn missing_or_exact_string(value: Option<&Value>, expected: &str) -> bool {
         Some(Value::String(value)) => value == expected,
         Some(_) => false,
     }
+}
+
+fn sanitized_nonempty(value: Option<&Value>) -> Option<String> {
+    let value = value?.as_str().map(crate::cli::sanitize_tmux_value)?;
+    (!value.is_empty()).then_some(value)
+}
+
+fn child_display_name(payload: Option<&Value>) -> Option<String> {
+    let payload = payload?;
+    sanitized_nonempty(payload.get("agent_path"))
+        .or_else(|| {
+            payload
+                .get("source")
+                .and_then(Value::as_object)
+                .and_then(|source| source.get("subagent"))
+                .and_then(Value::as_object)
+                .and_then(|subagent| subagent.get("thread_spawn"))
+                .and_then(Value::as_object)
+                .and_then(|spawn| sanitized_nonempty(spawn.get("agent_path")))
+        })
+        .or_else(|| sanitized_nonempty(payload.get("agent_nickname")))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -329,6 +357,7 @@ pub(crate) struct TranscriptTracker {
     closed_ids: HashSet<String>,
     child_trackers: HashMap<String, ChildRolloutTracker>,
     child_lifecycles: HashMap<String, ChildLifecycleSnapshot>,
+    child_names: HashMap<String, String>,
     discovery_retries: HashMap<String, DiscoveryRetry>,
     discovery_tick: u64,
 }
@@ -451,10 +480,15 @@ impl TranscriptTracker {
         &self.child_lifecycles
     }
 
+    pub(crate) fn child_names(&self) -> &HashMap<String, String> {
+        &self.child_names
+    }
+
     fn reset_context(&mut self) {
         self.reset_parent();
         self.child_trackers.clear();
         self.child_lifecycles.clear();
+        self.child_names.clear();
         self.discovery_retries.clear();
         self.discovery_tick = 0;
     }
@@ -478,6 +512,7 @@ impl TranscriptTracker {
         ) else {
             self.child_trackers.clear();
             self.child_lifecycles.clear();
+            self.child_names.clear();
             self.discovery_retries.clear();
             return;
         };
@@ -489,6 +524,7 @@ impl TranscriptTracker {
         live_ids.retain(|id| !self.closed_ids.contains(id));
         self.child_trackers.retain(|id, _| live_ids.contains(id));
         self.child_lifecycles.retain(|id, _| live_ids.contains(id));
+        self.child_names.retain(|id, _| live_ids.contains(id));
         self.discovery_retries.retain(|id, _| live_ids.contains(id));
 
         let tracked_ids = self.child_trackers.keys().cloned().collect::<Vec<_>>();
@@ -501,6 +537,9 @@ impl TranscriptTracker {
                 Ok(ChildRefreshOutcome::Present) if candidate.validated => {
                     if let Some(lifecycle) = candidate.lifecycle.clone() {
                         self.child_lifecycles.insert(id.clone(), lifecycle);
+                    }
+                    if let Some(name) = candidate.display_name.clone() {
+                        self.child_names.insert(id.clone(), name);
                     }
                     self.child_trackers.insert(id.clone(), candidate);
                     self.discovery_retries.remove(&id);
@@ -547,6 +586,9 @@ impl TranscriptTracker {
                     {
                         if let Some(lifecycle) = candidate.lifecycle.clone() {
                             self.child_lifecycles.insert(id.clone(), lifecycle);
+                        }
+                        if let Some(name) = candidate.display_name.clone() {
+                            self.child_names.insert(id.clone(), name);
                         }
                         self.child_trackers.insert(id.clone(), candidate);
                         self.discovery_retries.remove(&id);
@@ -602,8 +644,8 @@ impl TranscriptTracker {
             return;
         }
         let status = match payload.get("kind").and_then(Value::as_str) {
-            Some("started") => CodexAgentStatus::Working,
-            Some("interrupted") => CodexAgentStatus::Interrupted,
+            Some("started") => AgentStatus::Working,
+            Some("interrupted") => AgentStatus::Interrupted,
             _ => return,
         };
         let Some(raw_id) = payload.get("agent_thread_id").and_then(Value::as_str) else {
@@ -620,7 +662,7 @@ impl TranscriptTracker {
             .unwrap_or_default();
 
         match status {
-            CodexAgentStatus::Working => {
+            AgentStatus::Working => {
                 if let Some(agent) = self.agents.get_mut(&id) {
                     if agent.path.is_empty() && !path.is_empty() {
                         agent.path = path;
@@ -636,7 +678,7 @@ impl TranscriptTracker {
                     );
                 }
             }
-            CodexAgentStatus::Interrupted => {
+            AgentStatus::Interrupted => {
                 let Some(occurred_at_ms) = payload.get("occurred_at_ms").and_then(Value::as_u64)
                 else {
                     return;
@@ -649,7 +691,7 @@ impl TranscriptTracker {
                     );
                 }
             }
-            CodexAgentStatus::Done | CodexAgentStatus::Unknown => {}
+            AgentStatus::Done | AgentStatus::Unknown => {}
         }
     }
 
@@ -856,6 +898,75 @@ mod tests {
             child_id,
             parent_session_id,
         )
+    }
+
+    #[test]
+    fn child_meta_resolves_path_before_nickname() {
+        let child_id = "019f9307-0000-7000-8000-000000000002";
+        let parent_id = "019f9307-0000-7000-8000-000000000001";
+        let cases = [
+            (
+                json!({
+                    "id": child_id,
+                    "session_id": parent_id,
+                    "agent_path": "/root/top_level",
+                    "agent_nickname": "nickname",
+                    "source": {
+                        "subagent": {
+                            "thread_spawn": {
+                                "parent_thread_id": parent_id,
+                                "agent_path": "/root/nested"
+                            }
+                        }
+                    }
+                }),
+                "/root/top_level",
+            ),
+            (
+                json!({
+                    "id": child_id,
+                    "session_id": parent_id,
+                    "agent_nickname": "nickname",
+                    "source": {
+                        "subagent": {
+                            "thread_spawn": {
+                                "parent_thread_id": parent_id,
+                                "agent_path": "/root/nested"
+                            }
+                        }
+                    }
+                }),
+                "/root/nested",
+            ),
+            (
+                json!({
+                    "id": child_id,
+                    "session_id": parent_id,
+                    "agent_nickname": "nickname",
+                    "source": {
+                        "subagent": {
+                            "thread_spawn": {
+                                "parent_thread_id": parent_id
+                            }
+                        }
+                    }
+                }),
+                "nickname",
+            ),
+        ];
+
+        for (payload, expected) in cases {
+            let mut tracker = child_tracker(child_id, parent_id);
+            tracker.fold_line(
+                serde_json::to_string(&json!({
+                    "type": "session_meta",
+                    "payload": payload
+                }))
+                .unwrap()
+                .as_bytes(),
+            );
+            assert_eq!(tracker.display_name.as_deref(), Some(expected));
+        }
     }
 
     #[test]

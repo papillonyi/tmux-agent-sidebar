@@ -269,7 +269,7 @@ mod tests {
             "parent-1",
             "agent-a",
             "worker",
-            crate::codex_agents::CodexAgentStatus::Working,
+            crate::codex_agents::AgentStatus::Working,
             10_000,
         )
         .unwrap();

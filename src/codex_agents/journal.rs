@@ -7,7 +7,7 @@ use std::time::SystemTime;
 use indexmap::IndexMap;
 use serde_json::Value;
 
-use super::CodexAgentStatus;
+use super::AgentStatus;
 
 const JOURNAL_VERSION: u64 = 1;
 
@@ -43,13 +43,13 @@ pub(crate) fn append_lifecycle_event(
     parent_session_id: &str,
     agent_id: &str,
     agent_type: &str,
-    status: CodexAgentStatus,
+    status: AgentStatus,
     occurred_at_ms: u64,
 ) -> io::Result<()> {
     let state = match status {
-        CodexAgentStatus::Working => "working",
-        CodexAgentStatus::Done => "done",
-        CodexAgentStatus::Interrupted | CodexAgentStatus::Unknown => {
+        AgentStatus::Working => "working",
+        AgentStatus::Done => "done",
+        AgentStatus::Interrupted | AgentStatus::Unknown => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "hook journal only accepts working or done",
@@ -85,7 +85,7 @@ pub(crate) fn remove_journal(pane_id: &str) {
 pub(crate) struct LifecycleSnapshot {
     pub agent_id: String,
     pub agent_type: String,
-    pub status: CodexAgentStatus,
+    pub status: AgentStatus,
     pub started_at_ms: Option<u64>,
     pub finished_at_ms: Option<u64>,
     pub last_event_at_ms: u64,
@@ -192,8 +192,8 @@ impl JournalTracker {
             return;
         };
         let incoming_status = match record.get("state").and_then(Value::as_str) {
-            Some("working") => CodexAgentStatus::Working,
-            Some("done") => CodexAgentStatus::Done,
+            Some("working") => AgentStatus::Working,
+            Some("done") => AgentStatus::Done,
             _ => return,
         };
 
@@ -201,25 +201,25 @@ impl JournalTracker {
             current.agent_type = agent_type.to_owned();
             current.last_event_at_ms = occurred_at_ms;
             match incoming_status {
-                CodexAgentStatus::Working if current.status != CodexAgentStatus::Working => {
-                    current.status = CodexAgentStatus::Working;
+                AgentStatus::Working if current.status != AgentStatus::Working => {
+                    current.status = AgentStatus::Working;
                     current.started_at_ms = Some(occurred_at_ms);
                     current.finished_at_ms = None;
                 }
-                CodexAgentStatus::Done if current.status != CodexAgentStatus::Done => {
-                    current.status = CodexAgentStatus::Done;
+                AgentStatus::Done if current.status != AgentStatus::Done => {
+                    current.status = AgentStatus::Done;
                     current.finished_at_ms.get_or_insert(occurred_at_ms);
                 }
-                CodexAgentStatus::Working | CodexAgentStatus::Done => {}
-                CodexAgentStatus::Interrupted | CodexAgentStatus::Unknown => return,
+                AgentStatus::Working | AgentStatus::Done => {}
+                AgentStatus::Interrupted | AgentStatus::Unknown => return,
             }
             return;
         }
 
         let (started_at_ms, finished_at_ms) = match incoming_status {
-            CodexAgentStatus::Working => (Some(occurred_at_ms), None),
-            CodexAgentStatus::Done => (None, Some(occurred_at_ms)),
-            CodexAgentStatus::Interrupted | CodexAgentStatus::Unknown => return,
+            AgentStatus::Working => (Some(occurred_at_ms), None),
+            AgentStatus::Done => (None, Some(occurred_at_ms)),
+            AgentStatus::Interrupted | AgentStatus::Unknown => return,
         };
         self.snapshots.insert(
             agent_id.to_owned(),
@@ -243,7 +243,7 @@ mod tests {
     use std::thread;
 
     use super::{JournalTracker, append_lifecycle_event, journal_file_path, remove_journal};
-    use crate::codex_agents::CodexAgentStatus;
+    use crate::codex_agents::AgentStatus;
 
     fn unique_pane(test_name: &str) -> String {
         format!("%JOURNAL_{test_name}_{}", std::process::id())
@@ -265,7 +265,7 @@ mod tests {
             "parent-1",
             "agent-a",
             "worker",
-            CodexAgentStatus::Working,
+            AgentStatus::Working,
             10_000,
         )?;
         append_lifecycle_event(
@@ -273,14 +273,14 @@ mod tests {
             "parent-1",
             "agent-a",
             "worker",
-            CodexAgentStatus::Done,
+            AgentStatus::Done,
             25_000,
         )?;
 
         let mut tracker = tracker_for(&pane, "parent-1");
         tracker.refresh()?;
         let snapshot = tracker.snapshots().get("agent-a").expect("agent-a");
-        assert_eq!(snapshot.status, CodexAgentStatus::Done);
+        assert_eq!(snapshot.status, AgentStatus::Done);
         assert_eq!(snapshot.started_at_ms, Some(10_000));
         assert_eq!(snapshot.finished_at_ms, Some(25_000));
         assert_eq!(snapshot.last_event_at_ms, 25_000);
@@ -298,7 +298,7 @@ mod tests {
             "parent-1",
             "agent-a",
             "worker",
-            CodexAgentStatus::Working,
+            AgentStatus::Working,
             10_000,
         )?;
         append_lifecycle_event(
@@ -306,7 +306,7 @@ mod tests {
             "parent-1",
             "agent-a",
             "worker",
-            CodexAgentStatus::Working,
+            AgentStatus::Working,
             12_000,
         )?;
 
@@ -325,9 +325,9 @@ mod tests {
         let pane = unique_pane("duplicate_stop");
         remove_journal(&pane);
         for (status, occurred_at_ms) in [
-            (CodexAgentStatus::Working, 10_000),
-            (CodexAgentStatus::Done, 25_000),
-            (CodexAgentStatus::Done, 30_000),
+            (AgentStatus::Working, 10_000),
+            (AgentStatus::Done, 25_000),
+            (AgentStatus::Done, 30_000),
         ] {
             append_lifecycle_event(
                 &pane,
@@ -354,9 +354,9 @@ mod tests {
         let pane = unique_pane("restart_after_done");
         remove_journal(&pane);
         for (status, occurred_at_ms) in [
-            (CodexAgentStatus::Working, 10_000),
-            (CodexAgentStatus::Done, 25_000),
-            (CodexAgentStatus::Working, 40_000),
+            (AgentStatus::Working, 10_000),
+            (AgentStatus::Done, 25_000),
+            (AgentStatus::Working, 40_000),
         ] {
             append_lifecycle_event(
                 &pane,
@@ -371,7 +371,7 @@ mod tests {
         let mut tracker = tracker_for(&pane, "parent-1");
         tracker.refresh()?;
         let snapshot = tracker.snapshots().get("agent-a").expect("agent-a");
-        assert_eq!(snapshot.status, CodexAgentStatus::Working);
+        assert_eq!(snapshot.status, AgentStatus::Working);
         assert_eq!(snapshot.started_at_ms, Some(40_000));
         assert_eq!(snapshot.finished_at_ms, None);
 
@@ -388,14 +388,14 @@ mod tests {
             "parent-1",
             "agent-a",
             "worker",
-            CodexAgentStatus::Done,
+            AgentStatus::Done,
             25_000,
         )?;
 
         let mut tracker = tracker_for(&pane, "parent-1");
         tracker.refresh()?;
         let snapshot = tracker.snapshots().get("agent-a").expect("agent-a");
-        assert_eq!(snapshot.status, CodexAgentStatus::Done);
+        assert_eq!(snapshot.status, AgentStatus::Done);
         assert_eq!(snapshot.started_at_ms, None);
         assert_eq!(snapshot.finished_at_ms, Some(25_000));
 
@@ -412,7 +412,7 @@ mod tests {
             "parent-2",
             "agent-b",
             "worker",
-            CodexAgentStatus::Working,
+            AgentStatus::Working,
             10_000,
         )?;
         append_lifecycle_event(
@@ -420,7 +420,7 @@ mod tests {
             "parent-1",
             "agent-a",
             "worker",
-            CodexAgentStatus::Working,
+            AgentStatus::Working,
             11_000,
         )?;
 
@@ -458,7 +458,7 @@ mod tests {
             "parent-1",
             "agent-a",
             "worker",
-            CodexAgentStatus::Working,
+            AgentStatus::Working,
             10_000,
         )?;
 
@@ -490,7 +490,7 @@ mod tests {
                     "parent-1",
                     agent_id,
                     "worker",
-                    CodexAgentStatus::Working,
+                    AgentStatus::Working,
                     occurred_at_ms,
                 )
             }));

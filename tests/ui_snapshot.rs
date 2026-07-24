@@ -3,7 +3,7 @@ mod test_helpers;
 
 use test_helpers::*;
 use tmux_agent_sidebar::activity::{ActivityEntry, TaskProgress, TaskStatus};
-use tmux_agent_sidebar::codex_agents::{CodexAgentInfo, CodexAgentStatus};
+use tmux_agent_sidebar::codex_agents::{AgentRecord, AgentStatus};
 use tmux_agent_sidebar::codex_usage::CodexTokenUsage;
 use tmux_agent_sidebar::group::{PaneGitInfo, RepoGroup};
 use tmux_agent_sidebar::state::{Focus, PaneLocation, PopupState, RepoFilter, StatusFilter};
@@ -1626,35 +1626,31 @@ fn snapshot_codex_agent_history_matches_agent_panel_ui() {
     state.set_pane_codex_agents(
         "%1",
         vec![
-            CodexAgentInfo {
-                id: "019f9260-1111-2222-3333-444444444444".into(),
-                path: "/root/task1_owner_contract".into(),
-                fallback_agent_type: "worker".into(),
-                status: CodexAgentStatus::Done,
+            AgentRecord {
+                internal_id: "019f9260-1111-2222-3333-444444444444".into(),
+                display_name: "/root/task1_owner_contract".into(),
+                status: AgentStatus::Done,
                 started_at: Some(FIXED_NOW - 300),
                 finished_at: Some(FIXED_NOW - 135),
             },
-            CodexAgentInfo {
-                id: "019f9264-1111-2222-3333-444444444444".into(),
-                path: "/root/task2_owner_propagation".into(),
-                fallback_agent_type: "worker".into(),
-                status: CodexAgentStatus::Working,
+            AgentRecord {
+                internal_id: "019f9264-1111-2222-3333-444444444444".into(),
+                display_name: "/root/task2_owner_propagation".into(),
+                status: AgentStatus::Working,
                 started_at: Some(FIXED_NOW - 125),
                 finished_at: None,
             },
-            CodexAgentInfo {
-                id: "019f9267-1111-2222-3333-444444444444".into(),
-                path: "/root/task2_review".into(),
-                fallback_agent_type: "reviewer".into(),
-                status: CodexAgentStatus::Interrupted,
+            AgentRecord {
+                internal_id: "019f9267-1111-2222-3333-444444444444".into(),
+                display_name: "/root/task2_review".into(),
+                status: AgentStatus::Interrupted,
                 started_at: Some(FIXED_NOW - 200),
                 finished_at: Some(FIXED_NOW - 100),
             },
-            CodexAgentInfo {
-                id: "019f9268-1111-2222-3333-444444444444".into(),
-                path: "/root/task3_builder".into(),
-                fallback_agent_type: "builder".into(),
-                status: CodexAgentStatus::Unknown,
+            AgentRecord {
+                internal_id: "019f9268-1111-2222-3333-444444444444".into(),
+                display_name: "/root/task3_builder".into(),
+                status: AgentStatus::Unknown,
                 started_at: None,
                 finished_at: None,
             },
@@ -1667,11 +1663,11 @@ fn snapshot_codex_agent_history_matches_agent_panel_ui() {
     ⓘ                                                            — ▾
     project
     ┃ ● codex                                                      ┃
-    ┃   ├ Main [default] (current)                         019f920c┃
-    ┃   ├ /root/task1_owner_contract         019f9260  ✓ done 2m45s┃
-    ┃   ├ /root/task2_owner_propagation    019f9264  ● working 2m5s┃
-    ┃   ├ /root/task2_review                019f9267  ○ interrupted┃
-    ┃   └ /root/task3_builder                   019f9268  ? unknown┃
+    ┃   ├ Main [default] (current)                                 ┃
+    ┃   ├ /root/task1_owner_contract                   ✓ done 2m45s┃
+    ┃   ├ /root/task2_owner_propagation              ● working 2m5s┃
+    ┃   ├ /root/task2_review                          ○ interrupted┃
+    ┃   └ /root/task3_builder                             ? unknown┃
     ╭ Git ─────────────────────────────────────────────────────────╮
     │                      Working tree clean                      │
     ╰──────────────────────────────────────────────────────────────╯
@@ -1699,35 +1695,31 @@ fn snapshot_codex_agent_history_narrow_ui() {
     state.set_pane_codex_agents(
         "%1",
         vec![
-            CodexAgentInfo {
-                id: "019f9260-1111-2222-3333-444444444444".into(),
-                path: "/root/task1_owner_contract".into(),
-                fallback_agent_type: "worker".into(),
-                status: CodexAgentStatus::Done,
+            AgentRecord {
+                internal_id: "019f9260-1111-2222-3333-444444444444".into(),
+                display_name: "/root/task1_owner_contract".into(),
+                status: AgentStatus::Done,
                 started_at: Some(FIXED_NOW - 300),
                 finished_at: Some(FIXED_NOW - 135),
             },
-            CodexAgentInfo {
-                id: "019f9264-1111-2222-3333-444444444444".into(),
-                path: "/root/task2_owner_propagation".into(),
-                fallback_agent_type: "worker".into(),
-                status: CodexAgentStatus::Working,
+            AgentRecord {
+                internal_id: "019f9264-1111-2222-3333-444444444444".into(),
+                display_name: "/root/task2_owner_propagation".into(),
+                status: AgentStatus::Working,
                 started_at: Some(FIXED_NOW - 125),
                 finished_at: None,
             },
-            CodexAgentInfo {
-                id: "019f9267-1111-2222-3333-444444444444".into(),
-                path: "/root/task2_review".into(),
-                fallback_agent_type: "reviewer".into(),
-                status: CodexAgentStatus::Interrupted,
+            AgentRecord {
+                internal_id: "019f9267-1111-2222-3333-444444444444".into(),
+                display_name: "/root/task2_review".into(),
+                status: AgentStatus::Interrupted,
                 started_at: Some(FIXED_NOW - 200),
                 finished_at: Some(FIXED_NOW - 100),
             },
-            CodexAgentInfo {
-                id: "019f9268-1111-2222-3333-444444444444".into(),
-                path: "/root/task3_builder".into(),
-                fallback_agent_type: "builder".into(),
-                status: CodexAgentStatus::Unknown,
+            AgentRecord {
+                internal_id: "019f9268-1111-2222-3333-444444444444".into(),
+                display_name: "/root/task3_builder".into(),
+                status: AgentStatus::Unknown,
                 started_at: None,
                 finished_at: None,
             },
@@ -1740,11 +1732,11 @@ fn snapshot_codex_agent_history_narrow_ui() {
     ⓘ                            — ▾
     project
     ┃ ● codex                      ┃
-    ┃   ├ Main [default] … 019f920c┃
-    ┃   ├ /… 019f9260  ✓ done 2m45s┃
-    ┃   ├ …019f9264  ● working 2m5s┃
-    ┃   ├ … 019f9267  ○ interrupted┃
-    ┃   └ /roo… 019f9268  ? unknown┃
+    ┃   ├ Main [default] (current) ┃
+    ┃   ├ /root/task1… ✓ done 2m45s┃
+    ┃   ├ /root/tas… ● working 2m5s┃
+    ┃   ├ /root/task… ○ interrupted┃
+    ┃   └ /root/task3_bu… ? unknown┃
     ╭ Git ─────────────────────────╮
     │      Working tree clean      │
     ╰──────────────────────────────╯

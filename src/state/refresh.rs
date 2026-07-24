@@ -226,7 +226,7 @@ impl AppState {
                 session_id.as_deref(),
                 transcript_path.as_deref(),
             );
-            state.codex_agents = state.codex_agent_tracker.agents().to_vec();
+            state.codex_agents = state.codex_agent_tracker.records().to_vec();
         }
     }
 
@@ -923,7 +923,7 @@ mod tests {
             "parent-1",
             "agent-a",
             "worker",
-            crate::codex_agents::CodexAgentStatus::Working,
+            crate::codex_agents::AgentStatus::Working,
             10_000,
         )
         .unwrap();
@@ -988,8 +988,8 @@ mod tests {
         )
         .unwrap();
         for (status, occurred_at_ms) in [
-            (crate::codex_agents::CodexAgentStatus::Working, 10_999),
-            (crate::codex_agents::CodexAgentStatus::Done, 25_999),
+            (crate::codex_agents::AgentStatus::Working, 10_999),
+            (crate::codex_agents::AgentStatus::Done, 25_999),
         ] {
             crate::codex_agents::journal::append_lifecycle_event(
                 &pane_id,
@@ -1013,11 +1013,10 @@ mod tests {
         assert_eq!(
             state.pane_codex_agents(&pane_id),
             Some(
-                &[crate::codex_agents::CodexAgentInfo {
-                    id: "agent-full-id".into(),
-                    path: "/root/task1_review".into(),
-                    fallback_agent_type: "reviewer".into(),
-                    status: crate::codex_agents::CodexAgentStatus::Done,
+                &[crate::codex_agents::AgentRecord {
+                    internal_id: "agent-full-id".into(),
+                    display_name: "/root/task1_review".into(),
+                    status: crate::codex_agents::AgentStatus::Done,
                     started_at: Some(10),
                     finished_at: Some(25),
                 }][..]
@@ -1037,7 +1036,7 @@ mod tests {
             "parent-1",
             "agent-journal-only",
             "worker",
-            crate::codex_agents::CodexAgentStatus::Working,
+            crate::codex_agents::AgentStatus::Working,
             30_999,
         )
         .unwrap();
@@ -1054,13 +1053,9 @@ mod tests {
             .pane_codex_agents(&pane_id)
             .expect("Codex pane runtime entry");
         assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].id, "agent-journal-only");
-        assert!(agents[0].path.is_empty());
-        assert_eq!(agents[0].fallback_agent_type, "worker");
-        assert_eq!(
-            agents[0].status,
-            crate::codex_agents::CodexAgentStatus::Working
-        );
+        assert_eq!(agents[0].internal_id, "agent-journal-only");
+        assert_eq!(agents[0].display_name, "worker");
+        assert_eq!(agents[0].status, crate::codex_agents::AgentStatus::Working);
         assert_eq!(agents[0].started_at, Some(30));
 
         crate::codex_agents::journal::remove_journal(&pane_id);
@@ -1075,7 +1070,7 @@ mod tests {
             "parent-1",
             "agent-from-codex",
             "worker",
-            crate::codex_agents::CodexAgentStatus::Working,
+            crate::codex_agents::AgentStatus::Working,
             10_000,
         )
         .unwrap();
@@ -1096,7 +1091,7 @@ mod tests {
             "a live non-Codex pane must not retain visible Codex agents",
         );
         assert!(
-            runtime.codex_agent_tracker.agents().is_empty(),
+            runtime.codex_agent_tracker.records().is_empty(),
             "a live non-Codex pane must not retain the prior Codex tracker cache",
         );
 
