@@ -173,7 +173,10 @@ pub(super) fn codex_agent_rows(
     let main_prefix = "  ├ ";
     let main_id = parent_session_id.map(id_prefix).unwrap_or_default();
     let main_right_width = display_width(&main_id);
-    let main_gap = usize::from(!main_id.is_empty() && ctx.inner_width > main_right_width);
+    let main_minimum_left_width = display_width(main_prefix) + 1;
+    let main_gap = usize::from(
+        !main_id.is_empty() && ctx.inner_width > main_minimum_left_width + main_right_width,
+    );
     let main_left_budget = ctx.inner_width.saturating_sub(main_right_width + main_gap);
     let main_prefix = truncate_to_width(main_prefix, main_left_budget);
     let main_prefix_width = display_width(&main_prefix);
@@ -224,14 +227,17 @@ pub(super) fn codex_agent_rows(
             CodexAgentStatus::Interrupted | CodexAgentStatus::Unknown => String::new(),
         };
 
+        let connector_width = display_width(connector);
+        let minimum_left_width = connector_width + 1;
         let mandatory_right_width = display_width(&id) + 2 + display_width(status);
         let duration_width = display_width(&duration);
+        let duration_suffix_width = 1 + duration_width;
         let include_duration = !duration.is_empty()
             && ctx.inner_width
-                >= display_width(connector) + 1 + 1 + mandatory_right_width + 1 + duration_width;
+                >= minimum_left_width + mandatory_right_width + duration_suffix_width;
         let right_width =
-            mandatory_right_width + usize::from(include_duration) * (1 + duration_width);
-        let right_gap = usize::from(ctx.inner_width > right_width);
+            mandatory_right_width + usize::from(include_duration) * duration_suffix_width;
+        let right_gap = usize::from(ctx.inner_width > minimum_left_width + right_width);
         let left_budget = ctx.inner_width.saturating_sub(right_width + right_gap);
         let connector = truncate_to_width(connector, left_budget);
         let connector_width = display_width(&connector);

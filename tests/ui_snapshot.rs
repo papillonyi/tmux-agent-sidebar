@@ -1742,7 +1742,7 @@ fn snapshot_codex_agent_history_narrow_ui() {
     ┃ ● codex                      ┃
     ┃   ├ Main [default] … 019f920c┃
     ┃   ├ /… 019f9260  ✓ done 2m45s┃
-    ┃   ├ /roo… 019f9264  ● working┃
+    ┃   ├ …019f9264  ● working 2m5s┃
     ┃   ├ … 019f9267  ○ interrupted┃
     ┃   └ /roo… 019f9268  ? unknown┃
     ╭ Git ─────────────────────────╮

@@ -816,6 +816,78 @@ mod tests {
     }
 
     #[test]
+    fn codex_agent_rows_keep_main_label_cell_at_exact_boundary() {
+        let theme = ColorTheme::default();
+        let ctx = test_ctx(&theme, 13, false);
+        let agents = vec![CodexAgentInfo {
+            id: "019f9260-1111-2222-3333-444444444444".into(),
+            path: "worker".into(),
+            fallback_agent_type: "worker".into(),
+            status: CodexAgentStatus::Done,
+            started_at: None,
+            finished_at: None,
+        }];
+
+        let rows = body::codex_agent_rows(
+            Some("019f920c-bee2-7980-9ab1-0476552b63c8"),
+            &agents,
+            &ctx,
+            325,
+        );
+        let output = line_text(&rows[0]);
+
+        insta::assert_snapshot!(output, @"    ├ …019f920c");
+    }
+
+    #[test]
+    fn codex_agent_rows_keep_wide_label_cell_at_exact_mandatory_boundary() {
+        let theme = ColorTheme::default();
+        let ctx = test_ctx(&theme, 21, false);
+        let agents = vec![CodexAgentInfo {
+            id: "019f9260-1111-2222-3333-444444444444".into(),
+            path: "工作路径".into(),
+            fallback_agent_type: "worker".into(),
+            status: CodexAgentStatus::Done,
+            started_at: None,
+            finished_at: None,
+        }];
+
+        let rows = body::codex_agent_rows(
+            Some("019f920c-bee2-7980-9ab1-0476552b63c8"),
+            &agents,
+            &ctx,
+            325,
+        );
+        let output = line_text(&rows[1]);
+
+        insta::assert_snapshot!(output, @"    └ …019f9260  ✓ done");
+    }
+
+    #[test]
+    fn codex_agent_rows_keep_duration_at_exact_no_gap_boundary() {
+        let theme = ColorTheme::default();
+        let ctx = test_ctx(&theme, 27, false);
+        let agents = vec![CodexAgentInfo {
+            id: "019f9260-1111-2222-3333-444444444444".into(),
+            path: "工作路径".into(),
+            fallback_agent_type: "worker".into(),
+            status: CodexAgentStatus::Done,
+            started_at: Some(100),
+            finished_at: Some(265),
+        }];
+
+        let rows = body::codex_agent_rows(
+            Some("019f920c-bee2-7980-9ab1-0476552b63c8"),
+            &agents,
+            &ctx,
+            325,
+        );
+        let output = line_text(&rows[1]);
+
+        insta::assert_snapshot!(output, @"    └ …019f9260  ✓ done 2m45s");
+    }
+
+    #[test]
     fn codex_agent_rows_use_agent_type_for_hook_only_fallback() {
         let theme = ColorTheme::default();
         let ctx = test_ctx(&theme, 40, false);
