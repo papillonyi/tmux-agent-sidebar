@@ -107,6 +107,9 @@ fn push_pane(
     let ports = pane_state.map(|s| s.ports.as_slice());
     let task_progress = pane_state.and_then(|s| s.task_progress.as_ref());
     let token_usage = pane_state.and_then(|s| s.codex_token_usage.as_ref());
+    let codex_agents = pane_state
+        .map(|state| state.codex_agents.as_slice())
+        .filter(|agents| !agents.is_empty());
     let status_line_idx = collected.lines.len();
     let pane_lines = row::render_pane_lines_with_runtime(
         pane,
@@ -114,6 +117,7 @@ fn push_pane(
         ports,
         task_progress,
         token_usage,
+        codex_agents,
         is_selected,
         is_active,
         width,

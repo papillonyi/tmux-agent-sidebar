@@ -3,6 +3,7 @@ mod test_helpers;
 
 use test_helpers::*;
 use tmux_agent_sidebar::activity::{ActivityEntry, TaskProgress, TaskStatus};
+use tmux_agent_sidebar::codex_agents::{CodexAgentInfo, CodexAgentStatus};
 use tmux_agent_sidebar::codex_usage::CodexTokenUsage;
 use tmux_agent_sidebar::group::{PaneGitInfo, RepoGroup};
 use tmux_agent_sidebar::state::{Focus, PaneLocation, PopupState, RepoFilter, StatusFilter};
@@ -1614,6 +1615,174 @@ fn snapshot_focused_codex_pane_uses_accent_enclosure() {
     ╭ Activity ────────────────────╮
     │        No activity yet       │
     ╰──────────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_codex_agent_history_matches_agent_panel_ui() {
+    let mut pane = make_pane(AgentType::Codex, PaneStatus::Running);
+    pane.session_id = Some("019f920c-bee2-7980-9ab1-0476552b63c8".into());
+    let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
+    state.set_pane_codex_agents(
+        "%1",
+        vec![
+            CodexAgentInfo {
+                id: "019f9260-1111-2222-3333-444444444444".into(),
+                path: "/root/task1_owner_contract".into(),
+                fallback_agent_type: "worker".into(),
+                status: CodexAgentStatus::Done,
+                started_at: Some(FIXED_NOW - 300),
+                finished_at: Some(FIXED_NOW - 135),
+            },
+            CodexAgentInfo {
+                id: "019f9264-1111-2222-3333-444444444444".into(),
+                path: "/root/task2_owner_propagation".into(),
+                fallback_agent_type: "worker".into(),
+                status: CodexAgentStatus::Working,
+                started_at: Some(FIXED_NOW - 125),
+                finished_at: None,
+            },
+            CodexAgentInfo {
+                id: "019f9267-1111-2222-3333-444444444444".into(),
+                path: "/root/task2_review".into(),
+                fallback_agent_type: "reviewer".into(),
+                status: CodexAgentStatus::Interrupted,
+                started_at: Some(FIXED_NOW - 200),
+                finished_at: Some(FIXED_NOW - 100),
+            },
+            CodexAgentInfo {
+                id: "019f9268-1111-2222-3333-444444444444".into(),
+                path: "/root/task3_builder".into(),
+                fallback_agent_type: "builder".into(),
+                status: CodexAgentStatus::Unknown,
+                started_at: None,
+                finished_at: None,
+            },
+        ],
+    );
+
+    let output = render_to_string(&mut state, 64, 30);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◎0  ◐0  ○0  ✕0
+    ⓘ                                                            — ▾
+    project
+    ┃ ● codex                                                      ┃
+    ┃   ├ Main [default] (current)                         019f920c┃
+    ┃   ├ /root/task1_owner_contract         019f9260  ✓ done 2m45s┃
+    ┃   ├ /root/task2_owner_propagation    019f9264  ● working 2m5s┃
+    ┃   ├ /root/task2_review                019f9267  ○ interrupted┃
+    ┃   └ /root/task3_builder                   019f9268  ? unknown┃
+    ╭ Git ─────────────────────────────────────────────────────────╮
+    │                      Working tree clean                      │
+    ╰──────────────────────────────────────────────────────────────╯
+    ╭ Activity ────────────────────────────────────────────────────╮
+    │                        No activity yet                       │
+    ╰──────────────────────────────────────────────────────────────╯
+    ");
+    assert_eq!(
+        state
+            .layout
+            .line_to_row
+            .iter()
+            .filter(|mapping| **mapping == Some(0))
+            .count(),
+        6,
+        "status plus five agent rows should share the pane selection target",
+    );
+}
+
+#[test]
+fn snapshot_codex_agent_history_narrow_ui() {
+    let mut pane = make_pane(AgentType::Codex, PaneStatus::Running);
+    pane.session_id = Some("019f920c-bee2-7980-9ab1-0476552b63c8".into());
+    let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
+    state.set_pane_codex_agents(
+        "%1",
+        vec![
+            CodexAgentInfo {
+                id: "019f9260-1111-2222-3333-444444444444".into(),
+                path: "/root/task1_owner_contract".into(),
+                fallback_agent_type: "worker".into(),
+                status: CodexAgentStatus::Done,
+                started_at: Some(FIXED_NOW - 300),
+                finished_at: Some(FIXED_NOW - 135),
+            },
+            CodexAgentInfo {
+                id: "019f9264-1111-2222-3333-444444444444".into(),
+                path: "/root/task2_owner_propagation".into(),
+                fallback_agent_type: "worker".into(),
+                status: CodexAgentStatus::Working,
+                started_at: Some(FIXED_NOW - 125),
+                finished_at: None,
+            },
+            CodexAgentInfo {
+                id: "019f9267-1111-2222-3333-444444444444".into(),
+                path: "/root/task2_review".into(),
+                fallback_agent_type: "reviewer".into(),
+                status: CodexAgentStatus::Interrupted,
+                started_at: Some(FIXED_NOW - 200),
+                finished_at: Some(FIXED_NOW - 100),
+            },
+            CodexAgentInfo {
+                id: "019f9268-1111-2222-3333-444444444444".into(),
+                path: "/root/task3_builder".into(),
+                fallback_agent_type: "builder".into(),
+                status: CodexAgentStatus::Unknown,
+                started_at: None,
+                finished_at: None,
+            },
+        ],
+    );
+
+    let output = render_to_string(&mut state, 32, 30);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◎0  ◐0  ○0  ✕0
+    ⓘ                            — ▾
+    project
+    ┃ ● codex                      ┃
+    ┃   ├ Main [default] … 019f920c┃
+    ┃   ├ /… 019f9260  ✓ done 2m45s┃
+    ┃   ├ /roo… 019f9264  ● working┃
+    ┃   ├ … 019f9267  ○ interrupted┃
+    ┃   └ /roo… 019f9268  ? unknown┃
+    ╭ Git ─────────────────────────╮
+    │      Working tree clean      │
+    ╰──────────────────────────────╯
+    ╭ Activity ────────────────────╮
+    │        No activity yet       │
+    ╰──────────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_claude_subagents_remain_active_only_ui() {
+    let mut pane = make_pane(AgentType::Claude, PaneStatus::Running);
+    pane.subagents = vec![
+        SubagentInfo {
+            label: "Explore #1".into(),
+            started_at: Some(FIXED_NOW - 125),
+        },
+        SubagentInfo {
+            label: "Plan #2".into(),
+            started_at: Some(FIXED_NOW - 65),
+        },
+    ];
+    let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
+
+    let output = render_to_string(&mut state, 40, 30);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◎0  ◐0  ○0  ✕0
+    ⓘ                                    — ▾
+    project
+    ┃ ● claude
+        ├ Explore #1                  ● 2m5s
+        └ Plan #2                     ● 1m5s
+    ╭ Git ─────────────────────────────────╮
+    │          Working tree clean          │
+    ╰──────────────────────────────────────╯
+    ╭ Activity ────────────────────────────╮
+    │            No activity yet           │
+    ╰──────────────────────────────────────╯
     ");
 }
 

@@ -10,8 +10,8 @@ mod ctx;
 mod status;
 
 use body::{
-    background_hint_row, idle_hint_row, prompt_rows, subagent_rows, task_progress_row,
-    token_usage_row, wait_reason_row,
+    background_hint_row, codex_agent_rows, idle_hint_row, prompt_rows, subagent_rows,
+    task_progress_row, token_usage_row, wait_reason_row,
 };
 use branch::branch_ports_row;
 use ctx::{RowCtx, SELECTION_MARKER};
@@ -55,6 +55,7 @@ pub(super) fn render_pane_lines_with_ports(
         ports,
         task_progress,
         None,
+        None,
         selected,
         active,
         width,
@@ -72,6 +73,7 @@ pub(super) fn render_pane_lines_with_runtime(
     ports: Option<&[u16]>,
     task_progress: Option<&crate::activity::TaskProgress>,
     token_usage: Option<&crate::codex_usage::CodexTokenUsage>,
+    codex_agents: Option<&[crate::codex_agents::CodexAgentInfo]>,
     selected: bool,
     active: bool,
     width: usize,
@@ -163,7 +165,20 @@ pub(super) fn render_pane_lines_with_runtime(
     if let Some(line) = task_progress_row(task_progress, ctx) {
         out.push(line);
     }
-    out.extend(subagent_rows(&pane.subagents, ctx, now));
+    if pane.agent == AgentType::Codex {
+        if let Some(agents) = codex_agents.filter(|agents| !agents.is_empty()) {
+            out.extend(codex_agent_rows(
+                pane.session_id.as_deref(),
+                agents,
+                ctx,
+                now,
+            ));
+        } else {
+            out.extend(subagent_rows(&pane.subagents, ctx, now));
+        }
+    } else {
+        out.extend(subagent_rows(&pane.subagents, ctx, now));
+    }
     if let Some(line) = wait_reason_row(&pane.wait_reason, &pane.status, ctx) {
         out.push(line);
     }
@@ -181,6 +196,7 @@ pub(super) fn render_pane_lines_with_runtime(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::codex_agents::{CodexAgentInfo, CodexAgentStatus};
     use crate::group::PaneGitInfo;
     use crate::tmux::{AgentType, PaneInfo, PermissionMode, SubagentInfo, WorktreeMetadata};
     use crate::ui::icons::StatusIcons;
@@ -688,13 +704,142 @@ mod tests {
             0,
         );
 
-        assert!(lines.len() >= 5);
-        assert!(line_text(&lines[1]).contains("├ "));
-        assert!(line_text(&lines[1]).contains("Explore #1"));
-        assert!(line_text(&lines[2]).contains("├ "));
-        assert!(line_text(&lines[2]).contains("Plan #2"));
-        assert!(line_text(&lines[3]).contains("└ "));
-        assert!(line_text(&lines[3]).contains("Explore #2"));
+        let output = lines
+            .iter()
+            .map(line_text)
+            .map(|line| line.trim_end().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        insta::assert_snapshot!(output, @"
+        ● codex
+          ├ Explore #1                       ●
+          ├ Plan #2                          ●
+          └ Explore #2                       ●
+          test
+        ");
+    }
+
+    #[test]
+    fn codex_agent_rows_show_main_and_retained_lifecycle_history() {
+        let theme = ColorTheme::default();
+        let ctx = test_ctx(&theme, 72, false);
+        let agents = vec![
+            CodexAgentInfo {
+                id: "019f9260-1111-2222-3333-444444444444".into(),
+                path: "/root/task1_owner_contract".into(),
+                fallback_agent_type: "worker".into(),
+                status: CodexAgentStatus::Done,
+                started_at: Some(100),
+                finished_at: Some(265),
+            },
+            CodexAgentInfo {
+                id: "019f9264-1111-2222-3333-444444444444".into(),
+                path: "/root/task2_owner_propagation".into(),
+                fallback_agent_type: "worker".into(),
+                status: CodexAgentStatus::Working,
+                started_at: Some(200),
+                finished_at: None,
+            },
+            CodexAgentInfo {
+                id: "019f9267-1111-2222-3333-444444444444".into(),
+                path: "/root/task2_review".into(),
+                fallback_agent_type: "reviewer".into(),
+                status: CodexAgentStatus::Interrupted,
+                started_at: Some(210),
+                finished_at: Some(280),
+            },
+            CodexAgentInfo {
+                id: "019f9268-1111-2222-3333-444444444444".into(),
+                path: "/root/task3_builder".into(),
+                fallback_agent_type: "builder".into(),
+                status: CodexAgentStatus::Unknown,
+                started_at: None,
+                finished_at: None,
+            },
+        ];
+
+        let rows = body::codex_agent_rows(
+            Some("019f920c-bee2-7980-9ab1-0476552b63c8"),
+            &agents,
+            &ctx,
+            325,
+        );
+        let output = rows.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        insta::assert_snapshot!(output, @"
+        ├ Main [default] (current)                                    019f920c
+        ├ /root/task1_owner_contract                    019f9260  ✓ done 2m45s
+        ├ /root/task2_owner_propagation               019f9264  ● working 2m5s
+        ├ /root/task2_review                           019f9267  ○ interrupted
+        └ /root/task3_builder                              019f9268  ? unknown
+        ");
+        for (row_index, status, expected_color) in [
+            (1, "✓ done", theme.status_idle),
+            (2, "● working", theme.status_running),
+            (3, "○ interrupted", theme.status_waiting),
+            (4, "? unknown", theme.status_unknown),
+        ] {
+            let status_span = rows[row_index]
+                .spans
+                .iter()
+                .find(|span| span.content == status)
+                .expect("status span should remain independently styled");
+            assert_eq!(status_span.style.fg, Some(expected_color));
+        }
+    }
+
+    #[test]
+    fn codex_agent_rows_drop_duration_before_id_status_and_truncate_path() {
+        let theme = ColorTheme::default();
+        let ctx = test_ctx(&theme, 25, false);
+        let agents = vec![CodexAgentInfo {
+            id: "019f9260-1111-2222-3333-444444444444".into(),
+            path: "/root/task1_owner_contract".into(),
+            fallback_agent_type: "worker".into(),
+            status: CodexAgentStatus::Done,
+            started_at: Some(100),
+            finished_at: Some(265),
+        }];
+
+        let rows = body::codex_agent_rows(
+            Some("019f920c-bee2-7980-9ab1-0476552b63c8"),
+            &agents,
+            &ctx,
+            325,
+        );
+        let output = rows.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        insta::assert_snapshot!(output, @"
+        ├ Main [defau… 019f920c
+        └ /ro… 019f9260  ✓ done
+        ");
+    }
+
+    #[test]
+    fn codex_agent_rows_use_agent_type_for_hook_only_fallback() {
+        let theme = ColorTheme::default();
+        let ctx = test_ctx(&theme, 40, false);
+        let agents = vec![CodexAgentInfo {
+            id: "019f9264-1111-2222-3333-444444444444".into(),
+            path: String::new(),
+            fallback_agent_type: "worker".into(),
+            status: CodexAgentStatus::Working,
+            started_at: Some(200),
+            finished_at: None,
+        }];
+
+        let rows = body::codex_agent_rows(
+            Some("019f920c-bee2-7980-9ab1-0476552b63c8"),
+            &agents,
+            &ctx,
+            325,
+        );
+        let output = rows.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        insta::assert_snapshot!(output, @"
+            ├ Main [default] (current)    019f920c
+            └ worker      019f9264  ● working 2m5s
+        ");
     }
 
     #[test]
