@@ -1591,7 +1591,7 @@ fn snapshot_focus_activity_log_ui() {
 // ─── Right Border Integrity ──────────────────────────────────────
 
 #[test]
-fn snapshot_focused_codex_pane_uses_accent_enclosure() {
+fn snapshot_codex_ignores_stale_legacy_subagent_fallback() {
     let mut pane = make_pane(AgentType::Codex, PaneStatus::Running);
     pane.prompt = "review the focused pane styling".into();
     pane.subagents = vec![SubagentInfo {
@@ -1606,7 +1606,6 @@ fn snapshot_focused_codex_pane_uses_accent_enclosure() {
     ⓘ                            — ▾
     project
     ┃ ● codex                      ┃
-    ┃   └ default #a81f      ● 2m5s┃
     ┃   review the focused pane    ┃
     ┃   styling                    ┃
     ╭ Git ─────────────────────────╮

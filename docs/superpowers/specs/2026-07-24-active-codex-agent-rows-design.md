@@ -109,7 +109,9 @@ model, and terminal lifecycle.
 - `CodexAgentTracker` normalizes source data, filters its public records to
   `Working`, and exposes the parent model.
 - `PaneRuntimeState` stores the filtered child records and parent model.
-- `ui::panes::row::body` renders two lines per Main/child entry.
+- `ui::panes::row::body` renders two lines per Main/child entry and does not
+  fall back to stale `@pane_subagents` data when no normalized Codex child is
+  working.
 
 Claude Code and OpenCode keep their existing active-only single-line
 subagent rendering.
@@ -136,7 +138,8 @@ Tests must prove:
 - Main and every child render as two inline-snapshot rows;
 - narrow rendering preserves status before optional metadata;
 - internal IDs never appear;
-- row-to-pane click mapping covers both lines; and
+- row-to-pane click mapping covers both lines;
+- an empty normalized Codex list suppresses stale legacy subagent rows; and
 - Claude Code and OpenCode snapshots remain unchanged.
 
 Required repository verification:

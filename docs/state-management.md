@@ -44,7 +44,9 @@ Codex rollout, discovered per-child Codex rollouts, and the plugin-owned
 lifecycle journal. `CodexAgentTracker` adapts these inputs into active-only
 `Vec<AgentRecord>` values plus the parent model before they enter
 `PaneRuntimeState`; the Sidebar never parses rollout fields or selects between
-hook and rollout labels.
+hook and rollout labels. Codex rows do not fall back to `@pane_subagents` when
+the normalized list is empty, because that option can outlive an interrupted
+child; Claude Code and OpenCode continue to render it.
 
 Pane options written to tmux:
 

@@ -176,8 +176,6 @@ pub(super) fn render_pane_lines_with_runtime(
                 ctx,
                 now,
             ));
-        } else {
-            out.extend(subagent_rows(&pane.subagents, ctx, now));
         }
     } else {
         out.extend(subagent_rows(&pane.subagents, ctx, now));
@@ -665,6 +663,7 @@ mod tests {
     fn render_pane_lines_shows_single_subagent() {
         let theme = ColorTheme::default();
         let mut p = pane(PermissionMode::Default, PaneStatus::Running, "test");
+        p.agent = AgentType::Claude;
         p.subagents = vec![SubagentInfo {
             label: "Explore #sub1".into(),
             started_at: Some(1_000_000 - 125),
@@ -692,6 +691,7 @@ mod tests {
     fn render_pane_lines_shows_multiple_subagents_tree() {
         let theme = ColorTheme::default();
         let mut p = pane(PermissionMode::Default, PaneStatus::Running, "test");
+        p.agent = AgentType::Claude;
         p.subagents = vec!["Explore #1".into(), "Plan".into(), "Explore #2".into()];
         let lines = render_pane_lines_with_ports(
             &p,
@@ -714,7 +714,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         insta::assert_snapshot!(output, @"
-        ● codex
+        ● claude
           ├ Explore #1                       ●
           ├ Plan #2                          ●
           └ Explore #2                       ●
@@ -897,6 +897,7 @@ mod tests {
     fn render_pane_lines_subagents_before_wait_reason() {
         let theme = ColorTheme::default();
         let mut p = pane(PermissionMode::Default, PaneStatus::Waiting, "");
+        p.agent = AgentType::Claude;
         p.subagents = vec!["Explore".into()];
         p.wait_reason = "permission_prompt".into();
         let lines = render_pane_lines_with_ports(

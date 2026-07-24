@@ -16,7 +16,8 @@
 - Render only child records whose merged lifecycle state is `Working`.
 - Do not render parent or child internal IDs.
 - Keep all rollout schema knowledge in `src/codex_agents/transcript.rs`.
-- Preserve `@pane_subagents` compatibility behavior.
+- Preserve `@pane_subagents` parsing and non-Codex compatibility, but never
+  use it as a Codex UI fallback.
 - Do not change Claude Code or OpenCode subagent rendering.
 - Every rendered-frame assertion must use an inline `insta::assert_snapshot!`.
 - Run `cargo fmt` before every commit.
@@ -315,7 +316,34 @@ cargo test codex_agent_history --test ui_snapshot
 
 Expected: all selected snapshots pass.
 
-### Task 5: Document, verify, commit, and deploy locally
+### Task 5: Suppress stale legacy Codex fallback
+
+**Files:**
+- Modify: `src/ui/panes/row.rs`
+- Modify: `tests/ui_snapshot.rs`
+
+- [x] **Step 1: Add a failing live-state regression snapshot**
+
+Create a Codex pane with a stale `@pane_subagents` entry but no normalized
+working records. Assert that the legacy row is absent.
+
+- [x] **Step 2: Remove the Codex-only fallback**
+
+Render Codex child rows exclusively from normalized `AgentRecord` values.
+Keep the legacy single-line renderer for Claude Code and OpenCode.
+
+- [x] **Step 3: Run focused UI tests**
+
+Run:
+
+```bash
+cargo test ui::panes::row --lib
+cargo test --test ui_snapshot
+```
+
+Expected: all row and full-frame snapshots pass.
+
+### Task 6: Document, verify, commit, and deploy locally
 
 **Files:**
 - Modify: `docs/state-management.md`
