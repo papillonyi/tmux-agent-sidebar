@@ -80,6 +80,7 @@ impl CodexAgentTracker {
                 &catalog.id,
                 Some(catalog),
                 self.journal.snapshots().get(&catalog.id),
+                self.transcript.child_lifecycles().get(&catalog.id),
             ));
         }
 
@@ -89,25 +90,60 @@ impl CodexAgentTracker {
             {
                 continue;
             }
-            self.agents
-                .push(Self::merge_agent(&snapshot.agent_id, None, Some(snapshot)));
+            self.agents.push(Self::merge_agent(
+                &snapshot.agent_id,
+                None,
+                Some(snapshot),
+                self.transcript.child_lifecycles().get(&snapshot.agent_id),
+            ));
         }
     }
 
     fn merge_agent(
         id: &str,
         catalog: Option<&transcript::CatalogAgent>,
-        lifecycle: Option<&journal::LifecycleSnapshot>,
+        journal: Option<&journal::LifecycleSnapshot>,
+        child: Option<&transcript::ChildLifecycleSnapshot>,
     ) -> CodexAgentInfo {
-        let interrupted_at_ms = catalog.and_then(|agent| agent.interrupted_at_ms);
-        let status = match (lifecycle, interrupted_at_ms) {
-            (Some(snapshot), Some(interrupted)) if interrupted > snapshot.last_event_at_ms => {
-                CodexAgentStatus::Interrupted
-            }
-            (Some(snapshot), _) => snapshot.status,
-            (None, Some(_)) => CodexAgentStatus::Interrupted,
-            (None, None) => CodexAgentStatus::Unknown,
-        };
+        let mut latest = catalog
+            .and_then(|agent| agent.interrupted_at_ms)
+            .map(|timestamp| (CodexAgentStatus::Interrupted, timestamp, None, None));
+        if let Some(snapshot) = journal
+            && latest
+                .as_ref()
+                .is_none_or(|(_, timestamp, _, _)| snapshot.last_event_at_ms >= *timestamp)
+        {
+            latest = Some((
+                snapshot.status,
+                snapshot.last_event_at_ms,
+                snapshot.started_at_ms,
+                snapshot.finished_at_ms,
+            ));
+        }
+        if let Some(snapshot) = child
+            && latest
+                .as_ref()
+                .is_none_or(|(_, timestamp, _, _)| snapshot.last_event_at_ms >= *timestamp)
+        {
+            latest = Some((
+                snapshot.status,
+                snapshot.last_event_at_ms,
+                snapshot.started_at_ms,
+                snapshot.finished_at_ms,
+            ));
+        }
+        let (status, started_at_ms, finished_at_ms) = latest
+            .map(|(status, _, started_at_ms, finished_at_ms)| {
+                let started_at_ms =
+                    started_at_ms.or_else(|| journal.and_then(|snapshot| snapshot.started_at_ms));
+                let finished_at_ms = match status {
+                    CodexAgentStatus::Working | CodexAgentStatus::Unknown => None,
+                    CodexAgentStatus::Done | CodexAgentStatus::Interrupted => finished_at_ms
+                        .or_else(|| journal.and_then(|snapshot| snapshot.finished_at_ms)),
+                };
+                (status, started_at_ms, finished_at_ms)
+            })
+            .unwrap_or((CodexAgentStatus::Unknown, None, None));
 
         CodexAgentInfo {
             id: id.to_owned(),
@@ -115,16 +151,12 @@ impl CodexAgentTracker {
                 .map(|agent| agent.path.clone())
                 .filter(|path| !path.is_empty())
                 .unwrap_or_default(),
-            fallback_agent_type: lifecycle
+            fallback_agent_type: journal
                 .map(|snapshot| snapshot.agent_type.clone())
                 .unwrap_or_default(),
             status,
-            started_at: lifecycle
-                .and_then(|snapshot| snapshot.started_at_ms)
-                .map(|timestamp| timestamp / 1_000),
-            finished_at: lifecycle
-                .and_then(|snapshot| snapshot.finished_at_ms)
-                .map(|timestamp| timestamp / 1_000),
+            started_at: started_at_ms.map(|timestamp| timestamp / 1_000),
+            finished_at: finished_at_ms.map(|timestamp| timestamp / 1_000),
         }
     }
 }
@@ -186,6 +218,84 @@ mod tests {
             writeln!(file, "{line}")?;
         }
         Ok(())
+    }
+
+    fn rollout_path(
+        root: &Path,
+        date: (&str, &str, &str),
+        timestamp: &str,
+        id: &str,
+    ) -> io::Result<std::path::PathBuf> {
+        let dir = root.join("sessions").join(date.0).join(date.1).join(date.2);
+        fs::create_dir_all(&dir)?;
+        Ok(dir.join(format!("rollout-{timestamp}-{id}.jsonl")))
+    }
+
+    fn child_session_meta(id: &str, parent_session_id: &str) -> Value {
+        json!({
+            "type": "session_meta",
+            "payload": {
+                "id": id,
+                "session_id": parent_session_id,
+                "parent_thread_id": parent_session_id,
+                "source": {
+                    "subagent": {
+                        "thread_spawn": {
+                            "parent_thread_id": parent_session_id,
+                            "depth": 1
+                        }
+                    }
+                },
+                "thread_source": "subagent"
+            }
+        })
+    }
+
+    fn child_task_started(started_at: u64) -> Value {
+        json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "task_started",
+                "turn_id": "turn-1",
+                "started_at": started_at
+            }
+        })
+    }
+
+    fn child_task_complete(started_at: u64, completed_at: u64) -> Value {
+        json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "task_complete",
+                "turn_id": "turn-1",
+                "started_at": started_at,
+                "completed_at": completed_at
+            }
+        })
+    }
+
+    fn child_turn_interrupted(started_at: u64, completed_at: u64) -> Value {
+        json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "turn_aborted",
+                "turn_id": "turn-1",
+                "reason": "interrupted",
+                "started_at": started_at,
+                "completed_at": completed_at
+            }
+        })
+    }
+
+    fn write_child_rollout(
+        path: &Path,
+        id: &str,
+        parent_session_id: &str,
+        events: &[Value],
+    ) -> io::Result<()> {
+        let mut lines = vec![child_session_meta(id, parent_session_id)];
+        lines.extend_from_slice(events);
+        write_lines(path, &lines)
     }
 
     #[test]
@@ -518,6 +628,475 @@ mod tests {
 
         fs::remove_dir(&transcript)?;
         fs::remove_dir(&journal)?;
+        Ok(())
+    }
+
+    #[test]
+    fn child_terminal_rollouts_override_stale_working_journal() -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let parent_id = "019f9300-0000-7000-8000-000000000001";
+        let complete_id = "019f9300-0000-7000-8000-000000000002";
+        let interrupted_id = "019f9300-0000-7000-8000-000000000003";
+        let parent = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-00-00",
+            parent_id,
+        )?;
+        write_lines(
+            &parent,
+            &[
+                activity("started", complete_id, "/root/complete", 10_000),
+                activity("started", interrupted_id, "/root/interrupted", 11_000),
+            ],
+        )?;
+        let complete = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-00-01",
+            complete_id,
+        )?;
+        write_child_rollout(
+            &complete,
+            complete_id,
+            parent_id,
+            &[child_task_started(10), child_task_complete(10, 30)],
+        )?;
+        let interrupted = rollout_path(
+            dir.path(),
+            ("2026", "07", "25"),
+            "2026-07-25T00-00-01",
+            interrupted_id,
+        )?;
+        write_child_rollout(
+            &interrupted,
+            interrupted_id,
+            parent_id,
+            &[child_task_started(11), child_turn_interrupted(11, 40)],
+        )?;
+        let pane = unique_pane("child_terminal_override");
+        remove_journal(&pane);
+        for id in [complete_id, interrupted_id] {
+            append_lifecycle_event(
+                &pane,
+                parent_id,
+                id,
+                "worker",
+                CodexAgentStatus::Working,
+                20_000,
+            )?;
+        }
+
+        let mut tracker = CodexAgentTracker::default();
+        tracker.refresh(&pane, Some(parent_id), parent.to_str());
+
+        assert_eq!(tracker.agents()[0].status, CodexAgentStatus::Done);
+        assert_eq!(tracker.agents()[0].started_at, Some(10));
+        assert_eq!(tracker.agents()[0].finished_at, Some(30));
+        assert_eq!(tracker.agents()[1].status, CodexAgentStatus::Interrupted);
+        assert_eq!(tracker.agents()[1].started_at, Some(11));
+        assert_eq!(tracker.agents()[1].finished_at, Some(40));
+
+        remove_journal(&pane);
+        Ok(())
+    }
+
+    #[test]
+    fn child_rollout_rejects_identity_parent_and_source_mismatches() -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let parent_id = "019f9301-0000-7000-8000-000000000001";
+        let ids = [
+            "019f9301-0000-7000-8000-000000000002",
+            "019f9301-0000-7000-8000-000000000003",
+            "019f9301-0000-7000-8000-000000000004",
+        ];
+        let parent = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-01-00",
+            parent_id,
+        )?;
+        write_lines(
+            &parent,
+            &ids.iter()
+                .enumerate()
+                .map(|(index, id)| {
+                    activity(
+                        "started",
+                        id,
+                        &format!("/root/mismatch-{index}"),
+                        10_000 + index as u64,
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )?;
+        let bad_id = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-01-01",
+            ids[0],
+        )?;
+        write_child_rollout(
+            &bad_id,
+            "019f9301-0000-7000-8000-ffffffffffff",
+            parent_id,
+            &[child_turn_interrupted(10, 30)],
+        )?;
+        let bad_parent = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-01-02",
+            ids[1],
+        )?;
+        write_child_rollout(
+            &bad_parent,
+            ids[1],
+            "019f9301-0000-7000-8000-eeeeeeeeeeee",
+            &[child_turn_interrupted(10, 30)],
+        )?;
+        let bad_source = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-01-03",
+            ids[2],
+        )?;
+        write_lines(
+            &bad_source,
+            &[
+                json!({
+                    "type": "session_meta",
+                    "payload": {
+                        "id": ids[2],
+                        "session_id": parent_id,
+                        "parent_thread_id": parent_id,
+                        "source": { "user": {} },
+                        "thread_source": "user"
+                    }
+                }),
+                child_turn_interrupted(10, 30),
+            ],
+        )?;
+        let pane = unique_pane("child_identity_mismatch");
+        remove_journal(&pane);
+        for id in ids {
+            append_lifecycle_event(
+                &pane,
+                parent_id,
+                id,
+                "worker",
+                CodexAgentStatus::Working,
+                20_000,
+            )?;
+        }
+
+        let mut tracker = CodexAgentTracker::default();
+        tracker.refresh(&pane, Some(parent_id), parent.to_str());
+
+        assert!(
+            tracker
+                .agents()
+                .iter()
+                .all(|agent| agent.status == CodexAgentStatus::Working)
+        );
+        remove_journal(&pane);
+        Ok(())
+    }
+
+    #[test]
+    fn missing_child_rollout_is_discovered_on_bounded_retry_across_dates() -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let parent_id = "019f9302-0000-7000-8000-000000000001";
+        let child_id = "019f9302-0000-7000-8000-000000000002";
+        let parent = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T23-59-59",
+            parent_id,
+        )?;
+        write_lines(
+            &parent,
+            &[activity(
+                "started",
+                child_id,
+                "/root/across-midnight",
+                10_000,
+            )],
+        )?;
+        let pane = unique_pane("child_discovery_retry");
+        remove_journal(&pane);
+        let mut tracker = CodexAgentTracker::default();
+        tracker.refresh(&pane, Some(parent_id), parent.to_str());
+        assert_eq!(tracker.agents()[0].status, CodexAgentStatus::Unknown);
+
+        let child = rollout_path(
+            dir.path(),
+            ("2026", "07", "25"),
+            "2026-07-25T00-00-01",
+            child_id,
+        )?;
+        write_child_rollout(&child, child_id, parent_id, &[child_task_started(20)])?;
+        tracker.refresh(&pane, Some(parent_id), parent.to_str());
+
+        assert_eq!(tracker.agents()[0].status, CodexAgentStatus::Working);
+        assert_eq!(tracker.agents()[0].started_at, Some(20));
+        remove_journal(&pane);
+        Ok(())
+    }
+
+    #[test]
+    fn child_rollout_buffers_partial_lines_and_ignores_malformed_records() -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let parent_id = "019f9303-0000-7000-8000-000000000001";
+        let child_id = "019f9303-0000-7000-8000-000000000002";
+        let parent = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-03-00",
+            parent_id,
+        )?;
+        write_lines(
+            &parent,
+            &[activity("started", child_id, "/root/partial", 10_000)],
+        )?;
+        let child = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-03-01",
+            child_id,
+        )?;
+        write_child_rollout(&child, child_id, parent_id, &[child_task_started(10)])?;
+        let pane = unique_pane("child_partial");
+        remove_journal(&pane);
+        let mut tracker = CodexAgentTracker::default();
+        tracker.refresh(&pane, Some(parent_id), parent.to_str());
+        assert_eq!(tracker.agents()[0].status, CodexAgentStatus::Working);
+
+        let interrupted = child_turn_interrupted(10, 30).to_string();
+        let split = interrupted.len() / 2;
+        let mut file = fs::OpenOptions::new().append(true).open(&child)?;
+        file.write_all(b"{ malformed child json\n")?;
+        file.write_all(&interrupted.as_bytes()[..split])?;
+        tracker.refresh(&pane, Some(parent_id), parent.to_str());
+        assert_eq!(tracker.agents()[0].status, CodexAgentStatus::Working);
+
+        let mut file = fs::OpenOptions::new().append(true).open(&child)?;
+        file.write_all(&interrupted.as_bytes()[split..])?;
+        file.write_all(b"\n")?;
+        tracker.refresh(&pane, Some(parent_id), parent.to_str());
+        assert_eq!(tracker.agents()[0].status, CodexAgentStatus::Interrupted);
+        assert_eq!(tracker.agents()[0].finished_at, Some(30));
+        remove_journal(&pane);
+        Ok(())
+    }
+
+    #[test]
+    fn child_rollout_rebuilds_after_rewrite_and_can_resume_after_interrupt() -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let parent_id = "019f9304-0000-7000-8000-000000000001";
+        let child_id = "019f9304-0000-7000-8000-000000000002";
+        let parent = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-04-00",
+            parent_id,
+        )?;
+        write_lines(
+            &parent,
+            &[activity("started", child_id, "/root/rewrite", 10_000)],
+        )?;
+        let child = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-04-01",
+            child_id,
+        )?;
+        write_child_rollout(
+            &child,
+            child_id,
+            parent_id,
+            &[child_task_started(10), child_task_complete(10, 20)],
+        )?;
+        let pane = unique_pane("child_rewrite");
+        remove_journal(&pane);
+        let mut tracker = CodexAgentTracker::default();
+        tracker.refresh(&pane, Some(parent_id), parent.to_str());
+        assert_eq!(tracker.agents()[0].status, CodexAgentStatus::Done);
+
+        write_child_rollout(
+            &child,
+            child_id,
+            parent_id,
+            &[
+                child_task_started(30),
+                child_turn_interrupted(30, 40),
+                child_task_started(50),
+            ],
+        )?;
+        let mut file = fs::OpenOptions::new().append(true).open(&child)?;
+        writeln!(file, "{}", "x".repeat(1024))?;
+        tracker.refresh(&pane, Some(parent_id), parent.to_str());
+
+        assert_eq!(tracker.agents()[0].status, CodexAgentStatus::Working);
+        assert_eq!(tracker.agents()[0].started_at, Some(50));
+        assert_eq!(tracker.agents()[0].finished_at, None);
+        remove_journal(&pane);
+        Ok(())
+    }
+
+    #[test]
+    fn later_journal_start_wins_over_child_interruption() -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let parent_id = "019f9305-0000-7000-8000-000000000001";
+        let child_id = "019f9305-0000-7000-8000-000000000002";
+        let parent = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-05-00",
+            parent_id,
+        )?;
+        write_lines(
+            &parent,
+            &[activity("started", child_id, "/root/later-journal", 10_000)],
+        )?;
+        let child = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-05-01",
+            child_id,
+        )?;
+        write_child_rollout(
+            &child,
+            child_id,
+            parent_id,
+            &[child_task_started(10), child_turn_interrupted(10, 20)],
+        )?;
+        let pane = unique_pane("child_later_journal");
+        remove_journal(&pane);
+        let mut tracker = CodexAgentTracker::default();
+        tracker.refresh(&pane, Some(parent_id), parent.to_str());
+        assert_eq!(tracker.agents()[0].status, CodexAgentStatus::Interrupted);
+
+        append_lifecycle_event(
+            &pane,
+            parent_id,
+            child_id,
+            "worker",
+            CodexAgentStatus::Working,
+            30_000,
+        )?;
+
+        tracker.refresh(&pane, Some(parent_id), parent.to_str());
+
+        assert_eq!(tracker.agents()[0].status, CodexAgentStatus::Working);
+        assert_eq!(tracker.agents()[0].started_at, Some(30));
+        assert_eq!(tracker.agents()[0].finished_at, None);
+        remove_journal(&pane);
+        Ok(())
+    }
+
+    #[test]
+    fn parent_context_reset_clears_child_lifecycle_cache() -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let parent_a_id = "019f9306-0000-7000-8000-000000000001";
+        let child_a_id = "019f9306-0000-7000-8000-000000000002";
+        let parent_a = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-06-00",
+            parent_a_id,
+        )?;
+        write_lines(
+            &parent_a,
+            &[activity("started", child_a_id, "/root/old-child", 10_000)],
+        )?;
+        let child_a = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-06-01",
+            child_a_id,
+        )?;
+        write_child_rollout(
+            &child_a,
+            child_a_id,
+            parent_a_id,
+            &[child_task_started(10), child_turn_interrupted(10, 20)],
+        )?;
+        let pane = unique_pane("child_context_reset");
+        remove_journal(&pane);
+        let mut tracker = CodexAgentTracker::default();
+        tracker.refresh(&pane, Some(parent_a_id), parent_a.to_str());
+        assert_eq!(tracker.agents()[0].status, CodexAgentStatus::Interrupted);
+
+        let parent_b_id = "019f9306-0000-7000-8000-000000000003";
+        let child_b_id = "019f9306-0000-7000-8000-000000000004";
+        let parent_b = rollout_path(
+            dir.path(),
+            ("2026", "07", "25"),
+            "2026-07-25T15-06-00",
+            parent_b_id,
+        )?;
+        write_lines(
+            &parent_b,
+            &[activity("started", child_b_id, "/root/new-child", 30_000)],
+        )?;
+        tracker.refresh(&pane, Some(parent_b_id), parent_b.to_str());
+
+        assert_eq!(tracker.agents().len(), 1);
+        assert_eq!(tracker.agents()[0].id, child_b_id);
+        assert_eq!(tracker.agents()[0].status, CodexAgentStatus::Unknown);
+        remove_journal(&pane);
+        Ok(())
+    }
+
+    #[test]
+    fn close_prunes_child_lifecycle_before_same_context_rediscovery() -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let parent_id = "019f9307-0000-7000-8000-000000000001";
+        let child_id = "019f9307-0000-7000-8000-000000000002";
+        let parent = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-07-00",
+            parent_id,
+        )?;
+        write_lines(
+            &parent,
+            &[activity("started", child_id, "/root/closed-child", 10_000)],
+        )?;
+        let child = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-07-01",
+            child_id,
+        )?;
+        write_child_rollout(
+            &child,
+            child_id,
+            parent_id,
+            &[child_task_started(10), child_turn_interrupted(10, 20)],
+        )?;
+        let pane = unique_pane("child_close_prunes");
+        remove_journal(&pane);
+        let mut tracker = CodexAgentTracker::default();
+        tracker.refresh(&pane, Some(parent_id), parent.to_str());
+        assert_eq!(tracker.agents()[0].status, CodexAgentStatus::Interrupted);
+
+        let mut file = fs::OpenOptions::new().append(true).open(&parent)?;
+        writeln!(file, "{}", close_call(child_id, "close-child"))?;
+        writeln!(file, "{}", close_output("close-child"))?;
+        tracker.refresh(&pane, Some(parent_id), parent.to_str());
+        assert!(tracker.agents().is_empty());
+
+        fs::remove_file(&child)?;
+        write_lines(
+            &parent,
+            &[activity("started", child_id, "/root/closed-child", 30_000)],
+        )?;
+        tracker.refresh(&pane, Some(parent_id), parent.to_str());
+
+        assert_eq!(tracker.agents().len(), 1);
+        assert_eq!(tracker.agents()[0].status, CodexAgentStatus::Unknown);
+        remove_journal(&pane);
         Ok(())
     }
 }
