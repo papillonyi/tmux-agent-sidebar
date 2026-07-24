@@ -137,7 +137,7 @@ mod tests {
 
     use serde_json::{Value, json};
 
-    use super::{CodexAgentStatus, CodexAgentTracker};
+    use super::{CodexAgentInfo, CodexAgentStatus, CodexAgentTracker};
     use crate::codex_agents::journal::{append_lifecycle_event, journal_file_path, remove_journal};
 
     fn unique_pane(test_name: &str) -> String {
@@ -435,6 +435,89 @@ mod tests {
 
         remove_journal(&old_pane);
         remove_journal(&new_pane);
+        Ok(())
+    }
+
+    #[test]
+    fn merge_parent_change_clears_journal_only_cache() -> io::Result<()> {
+        let pane = unique_pane("journal_parent_change");
+        remove_journal(&pane);
+        append_lifecycle_event(
+            &pane,
+            "parent-old",
+            "agent-from-old-parent",
+            "worker",
+            CodexAgentStatus::Working,
+            10_000,
+        )?;
+
+        let mut tracker = CodexAgentTracker::default();
+        tracker.refresh(&pane, Some("parent-old"), None);
+        assert_eq!(tracker.agents().len(), 1);
+
+        tracker.refresh(&pane, Some("parent-new"), None);
+
+        assert!(
+            tracker.agents().is_empty(),
+            "journal-only rows from the previous parent session must not survive a context change",
+        );
+
+        remove_journal(&pane);
+        Ok(())
+    }
+
+    #[test]
+    fn merge_same_context_read_errors_preserve_last_valid_source_caches() -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let transcript = dir.path().join("rollout.jsonl");
+        let pane = unique_pane("same_context_errors");
+        remove_journal(&pane);
+        write_lines(
+            &transcript,
+            &[activity(
+                "started",
+                "agent-from-valid-cache",
+                "/root/stable-task",
+                1_000,
+            )],
+        )?;
+        append_lifecycle_event(
+            &pane,
+            "parent-1",
+            "agent-from-valid-cache",
+            "worker",
+            CodexAgentStatus::Working,
+            10_999,
+        )?;
+
+        let mut tracker = CodexAgentTracker::default();
+        tracker.refresh(&pane, Some("parent-1"), transcript.to_str());
+        let expected = [CodexAgentInfo {
+            id: "agent-from-valid-cache".into(),
+            path: "/root/stable-task".into(),
+            fallback_agent_type: "worker".into(),
+            status: CodexAgentStatus::Working,
+            started_at: Some(10),
+            finished_at: None,
+        }];
+        assert_eq!(tracker.agents(), &expected);
+
+        fs::remove_file(&transcript)?;
+        fs::create_dir(&transcript)?;
+        let journal = journal_file_path(&pane);
+        fs::remove_file(&journal)?;
+        fs::create_dir(&journal)?;
+
+        tracker.refresh(&pane, Some("parent-1"), transcript.to_str());
+
+        assert_eq!(
+            tracker.agents(),
+            &expected,
+            "transient read errors in an unchanged context must preserve both source caches",
+        );
+
+        fs::remove_dir(&transcript)?;
+        fs::remove_dir(&journal)?;
         Ok(())
     }
 }
