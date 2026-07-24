@@ -211,18 +211,10 @@ impl ChildRolloutTracker {
         {
             return false;
         }
-        if payload
-            .get("parent_thread_id")
-            .and_then(Value::as_str)
-            .is_some_and(|id| id != self.parent_session_id)
-        {
+        if !missing_or_exact_string(payload.get("parent_thread_id"), &self.parent_session_id) {
             return false;
         }
-        if payload
-            .get("thread_source")
-            .and_then(Value::as_str)
-            .is_some_and(|source| source != "subagent")
-        {
+        if !missing_or_exact_string(payload.get("thread_source"), "subagent") {
             return false;
         }
 
@@ -230,13 +222,17 @@ impl ChildRolloutTracker {
             None | Some(Value::Null) => true,
             Some(Value::String(source)) => source == "subagent",
             Some(Value::Object(source)) => {
-                let Some(subagent) = source.get("subagent") else {
+                let Some(Value::Object(subagent)) = source.get("subagent") else {
                     return false;
                 };
-                subagent
-                    .pointer("/thread_spawn/parent_thread_id")
-                    .and_then(Value::as_str)
-                    .is_none_or(|id| id == self.parent_session_id)
+                match subagent.get("thread_spawn") {
+                    None => true,
+                    Some(Value::Object(thread_spawn)) => missing_or_exact_string(
+                        thread_spawn.get("parent_thread_id"),
+                        &self.parent_session_id,
+                    ),
+                    Some(_) => false,
+                }
             }
             Some(_) => false,
         }
@@ -297,6 +293,14 @@ impl ChildRolloutTracker {
 
 fn seconds_to_millis(value: Option<&Value>) -> Option<u64> {
     value.as_ref()?.as_u64()?.checked_mul(1_000)
+}
+
+fn missing_or_exact_string(value: Option<&Value>, expected: &str) -> bool {
+    match value {
+        None => true,
+        Some(Value::String(value)) => value == expected,
+        Some(_) => false,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -729,6 +733,10 @@ fn discover_child_rollouts(
     child_ids: &HashSet<String>,
 ) -> HashMap<String, Vec<PathBuf>> {
     let mut matches = HashMap::<String, Vec<PathBuf>>::new();
+    let suffixes = child_ids
+        .iter()
+        .map(|id| (format!("-{id}.jsonl"), id))
+        .collect::<Vec<_>>();
     let mut stack = vec![root.to_path_buf()];
 
     while let Some(directory) = stack.pop() {
@@ -749,12 +757,13 @@ fn discover_child_rollouts(
             if !file_type.is_file() {
                 continue;
             }
-            let Some(file_name) = entry.file_name().to_str().map(str::to_owned) else {
+            let file_name = entry.file_name();
+            let Some(file_name) = file_name.to_str() else {
                 continue;
             };
-            for id in child_ids {
-                if file_name.ends_with(&format!("-{id}.jsonl")) {
-                    matches.entry(id.clone()).or_default().push(entry.path());
+            for (suffix, id) in &suffixes {
+                if file_name.ends_with(suffix.as_str()) {
+                    matches.entry((*id).clone()).or_default().push(entry.path());
                     break;
                 }
             }
@@ -771,11 +780,11 @@ fn discover_child_rollouts(
 mod tests {
     use std::fs::{self, OpenOptions};
     use std::io::{self, Write};
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     use serde_json::{Value, json};
 
-    use super::TranscriptTracker;
+    use super::{ChildRolloutTracker, TranscriptTracker};
 
     fn activity(kind: &str, id: &str, path: &str, occurred_at_ms: u64) -> Value {
         json!({
@@ -833,6 +842,99 @@ mod tests {
         let mut tracker = TranscriptTracker::default();
         assert!(tracker.set_context(path.to_str(), Some(parent_session_id)));
         tracker
+    }
+
+    fn child_tracker(child_id: &str, parent_session_id: &str) -> ChildRolloutTracker {
+        ChildRolloutTracker::new(
+            PathBuf::from("/tmp/unused-child-rollout.jsonl"),
+            child_id,
+            parent_session_id,
+        )
+    }
+
+    #[test]
+    fn child_meta_rejects_wrong_typed_top_level_relationship_fields() {
+        let child_id = "019f9308-0000-7000-8000-000000000002";
+        let parent_id = "019f9308-0000-7000-8000-000000000001";
+        let tracker = child_tracker(child_id, parent_id);
+        let malformed_values = [
+            ("parent_thread_id", Value::Null),
+            ("parent_thread_id", json!({})),
+            ("parent_thread_id", json!("wrong-parent")),
+            ("thread_source", Value::Null),
+            ("thread_source", json!({})),
+            ("thread_source", json!("user")),
+        ];
+
+        for (field, value) in malformed_values {
+            let mut payload = json!({
+                "id": child_id,
+                "session_id": parent_id,
+                "parent_thread_id": parent_id,
+                "thread_source": "subagent",
+                "source": {
+                    "subagent": {
+                        "thread_spawn": {
+                            "parent_thread_id": parent_id
+                        }
+                    }
+                }
+            });
+            payload[field] = value;
+            assert!(
+                !tracker.valid_session_meta(Some(&payload)),
+                "accepted malformed {field}: {payload}",
+            );
+        }
+    }
+
+    #[test]
+    fn child_meta_rejects_malformed_nested_subagent_relationship_fields() {
+        let child_id = "019f9309-0000-7000-8000-000000000002";
+        let parent_id = "019f9309-0000-7000-8000-000000000001";
+        let tracker = child_tracker(child_id, parent_id);
+        let malformed_sources = [
+            json!({}),
+            json!({ "subagent": null }),
+            json!({ "subagent": [] }),
+            json!({ "subagent": { "thread_spawn": null } }),
+            json!({ "subagent": { "thread_spawn": [] } }),
+            json!({
+                "subagent": {
+                    "thread_spawn": {
+                        "parent_thread_id": null
+                    }
+                }
+            }),
+            json!({
+                "subagent": {
+                    "thread_spawn": {
+                        "parent_thread_id": {}
+                    }
+                }
+            }),
+            json!({
+                "subagent": {
+                    "thread_spawn": {
+                        "parent_thread_id": "wrong-parent"
+                    }
+                }
+            }),
+        ];
+
+        for source in malformed_sources {
+            let payload = json!({
+                "id": child_id,
+                "session_id": parent_id,
+                "parent_thread_id": parent_id,
+                "thread_source": "subagent",
+                "source": source
+            });
+            assert!(
+                !tracker.valid_session_meta(Some(&payload)),
+                "accepted malformed source: {payload}",
+            );
+        }
     }
 
     #[test]
