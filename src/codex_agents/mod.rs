@@ -1,4 +1,5 @@
 pub mod journal;
+pub mod transcript;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodexAgentStatus {
