@@ -353,8 +353,15 @@ impl TranscriptTracker {
     }
 
     pub(crate) fn refresh(&mut self) -> io::Result<()> {
+        self.refresh_with_child_ids(&[])
+    }
+
+    pub(crate) fn refresh_with_child_ids(
+        &mut self,
+        additional_child_ids: &[String],
+    ) -> io::Result<()> {
         self.refresh_parent()?;
-        self.refresh_children();
+        self.refresh_children(additional_child_ids);
         Ok(())
     }
 
@@ -464,7 +471,7 @@ impl TranscriptTracker {
         self.closed_ids.clear();
     }
 
-    fn refresh_children(&mut self) {
+    fn refresh_children(&mut self, additional_child_ids: &[String]) {
         let (Some(parent_session_id), Some(sessions_root)) = (
             self.parent_session_id.clone(),
             self.path.as_deref().and_then(sessions_root),
@@ -477,12 +484,9 @@ impl TranscriptTracker {
 
         self.discovery_tick = self.discovery_tick.saturating_add(1);
         let tick = self.discovery_tick;
-        let live_ids = self
-            .agents
-            .keys()
-            .filter(|id| !self.closed_ids.contains(*id))
-            .cloned()
-            .collect::<HashSet<_>>();
+        let mut live_ids = self.agents.keys().cloned().collect::<HashSet<_>>();
+        live_ids.extend(additional_child_ids.iter().cloned());
+        live_ids.retain(|id| !self.closed_ids.contains(id));
         self.child_trackers.retain(|id, _| live_ids.contains(id));
         self.child_lifecycles.retain(|id, _| live_ids.contains(id));
         self.discovery_retries.retain(|id, _| live_ids.contains(id));

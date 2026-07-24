@@ -41,24 +41,25 @@ impl CodexAgentTracker {
             return;
         }
 
-        if self
-            .transcript
-            .set_context(transcript_path, parent_session_id)
-        {
-            let _ = self.transcript.refresh();
-        } else {
-            let mut transcript = self.transcript.clone();
-            if transcript.refresh().is_ok() {
-                self.transcript = transcript;
-            }
-        }
-
         if self.journal.set_context(pane_id, parent_session_id) {
             let _ = self.journal.refresh();
         } else {
             let mut journal = self.journal.clone();
             if journal.refresh().is_ok() {
                 self.journal = journal;
+            }
+        }
+
+        let journal_ids = self.journal.snapshots().keys().cloned().collect::<Vec<_>>();
+        if self
+            .transcript
+            .set_context(transcript_path, parent_session_id)
+        {
+            let _ = self.transcript.refresh_with_child_ids(&journal_ids);
+        } else {
+            let mut transcript = self.transcript.clone();
+            if transcript.refresh_with_child_ids(&journal_ids).is_ok() {
+                self.transcript = transcript;
             }
         }
 
@@ -697,6 +698,145 @@ mod tests {
         assert_eq!(tracker.agents()[1].started_at, Some(11));
         assert_eq!(tracker.agents()[1].finished_at, Some(40));
 
+        remove_journal(&pane);
+        Ok(())
+    }
+
+    #[test]
+    fn journal_only_children_use_child_rollout_terminal_lifecycle() -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let parent_id = "019f930b-0000-7000-8000-000000000001";
+        let complete_id = "019f930b-0000-7000-8000-000000000002";
+        let interrupted_id = "019f930b-0000-7000-8000-000000000003";
+        let parent = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-11-00",
+            parent_id,
+        )?;
+        write_lines(&parent, &[])?;
+        let complete = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-11-01",
+            complete_id,
+        )?;
+        write_child_rollout(
+            &complete,
+            complete_id,
+            parent_id,
+            &[child_task_started(10), child_task_complete(10, 30)],
+        )?;
+        let interrupted = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-11-02",
+            interrupted_id,
+        )?;
+        write_child_rollout(
+            &interrupted,
+            interrupted_id,
+            parent_id,
+            &[child_task_started(11), child_turn_interrupted(11, 40)],
+        )?;
+        let pane = unique_pane("journal_only_child_terminal");
+        remove_journal(&pane);
+        for id in [complete_id, interrupted_id] {
+            append_lifecycle_event(
+                &pane,
+                parent_id,
+                id,
+                "worker",
+                CodexAgentStatus::Working,
+                20_000,
+            )?;
+        }
+
+        let mut tracker = CodexAgentTracker::default();
+        tracker.refresh(&pane, Some(parent_id), parent.to_str());
+
+        assert_eq!(
+            tracker.agents(),
+            &[
+                CodexAgentInfo {
+                    id: complete_id.into(),
+                    path: String::new(),
+                    fallback_agent_type: "worker".into(),
+                    status: CodexAgentStatus::Done,
+                    started_at: Some(10),
+                    finished_at: Some(30),
+                },
+                CodexAgentInfo {
+                    id: interrupted_id.into(),
+                    path: String::new(),
+                    fallback_agent_type: "worker".into(),
+                    status: CodexAgentStatus::Interrupted,
+                    started_at: Some(11),
+                    finished_at: Some(40),
+                },
+            ],
+        );
+        remove_journal(&pane);
+        Ok(())
+    }
+
+    #[test]
+    fn closed_journal_child_is_not_rediscovered_or_resurrected() -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let parent_id = "019f930c-0000-7000-8000-000000000001";
+        let child_id = "019f930c-0000-7000-8000-000000000002";
+        let parent = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-12-00",
+            parent_id,
+        )?;
+        write_lines(
+            &parent,
+            &[activity(
+                "started",
+                child_id,
+                "/root/closed-journal-child",
+                10_000,
+            )],
+        )?;
+        let child = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-12-01",
+            child_id,
+        )?;
+        write_child_rollout(
+            &child,
+            child_id,
+            parent_id,
+            &[child_task_started(10), child_task_complete(10, 30)],
+        )?;
+        let pane = unique_pane("closed_journal_child");
+        remove_journal(&pane);
+        append_lifecycle_event(
+            &pane,
+            parent_id,
+            child_id,
+            "worker",
+            CodexAgentStatus::Working,
+            20_000,
+        )?;
+        let mut tracker = CodexAgentTracker::default();
+        tracker.refresh(&pane, Some(parent_id), parent.to_str());
+        assert_eq!(tracker.agents()[0].status, CodexAgentStatus::Done);
+
+        let mut file = fs::OpenOptions::new().append(true).open(&parent)?;
+        writeln!(file, "{}", close_call(child_id, "close-journal-child"))?;
+        writeln!(file, "{}", close_output("close-journal-child"))?;
+        tracker.refresh(&pane, Some(parent_id), parent.to_str());
+        assert!(tracker.agents().is_empty());
+
+        tracker.refresh(&pane, Some(parent_id), parent.to_str());
+        assert!(
+            tracker.agents().is_empty(),
+            "retained journal and child rollout must not resurrect a confirmed closed ID",
+        );
         remove_journal(&pane);
         Ok(())
     }
