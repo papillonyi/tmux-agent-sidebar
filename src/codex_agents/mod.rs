@@ -41,16 +41,25 @@ impl CodexAgentTracker {
             return;
         }
 
-        let mut transcript = self.transcript.clone();
-        transcript.set_context(transcript_path, parent_session_id);
-        if transcript.refresh().is_ok() {
-            self.transcript = transcript;
+        if self
+            .transcript
+            .set_context(transcript_path, parent_session_id)
+        {
+            let _ = self.transcript.refresh();
+        } else {
+            let mut transcript = self.transcript.clone();
+            if transcript.refresh().is_ok() {
+                self.transcript = transcript;
+            }
         }
 
-        let mut journal = self.journal.clone();
-        journal.set_context(pane_id, parent_session_id);
-        if journal.refresh().is_ok() {
-            self.journal = journal;
+        if self.journal.set_context(pane_id, parent_session_id) {
+            let _ = self.journal.refresh();
+        } else {
+            let mut journal = self.journal.clone();
+            if journal.refresh().is_ok() {
+                self.journal = journal;
+            }
         }
 
         self.rebuild_agents();
@@ -392,6 +401,40 @@ mod tests {
 
         assert!(journal_file_path(&pane).exists());
         remove_journal(&pane);
+        Ok(())
+    }
+
+    #[test]
+    fn merge_context_change_does_not_expose_previous_cache_when_new_read_fails() -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let transcript = dir.path().join("old-rollout.jsonl");
+        let old_pane = unique_pane("old_context");
+        let new_pane = unique_pane("new_context");
+        remove_journal(&old_pane);
+        remove_journal(&new_pane);
+        write_lines(
+            &transcript,
+            &[activity(
+                "started",
+                "agent-from-old-context",
+                "/root/old-task",
+                1_000,
+            )],
+        )?;
+
+        let mut tracker = CodexAgentTracker::default();
+        tracker.refresh(&old_pane, Some("parent-old"), transcript.to_str());
+        assert_eq!(tracker.agents().len(), 1);
+
+        tracker.refresh(&new_pane, Some("parent-new"), dir.path().to_str());
+
+        assert!(
+            tracker.agents().is_empty(),
+            "a failed first read in a new context must not expose agents cached for the old context",
+        );
+
+        remove_journal(&old_pane);
+        remove_journal(&new_pane);
         Ok(())
     }
 }

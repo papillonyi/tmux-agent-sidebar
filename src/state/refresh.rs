@@ -198,21 +198,28 @@ impl AppState {
     }
 
     fn refresh_codex_agents(&mut self, transcript_paths: &HashMap<String, String>) {
-        let panes: Vec<(String, Option<String>, Option<String>)> = self
+        let panes: Vec<(String, bool, Option<String>, Option<String>)> = self
             .repo_groups
             .iter()
             .flat_map(|group| group.panes.iter())
-            .filter(|(pane, _)| pane.agent == AgentType::Codex)
             .map(|(pane, _)| {
                 (
                     pane.pane_id.clone(),
+                    pane.agent == AgentType::Codex,
                     pane.session_id.clone(),
                     transcript_paths.get(&pane.pane_id).cloned(),
                 )
             })
             .collect();
 
-        for (pane_id, session_id, transcript_path) in panes {
+        for (pane_id, is_codex, session_id, transcript_path) in panes {
+            if !is_codex {
+                if let Some(state) = self.pane_states.get_mut(&pane_id) {
+                    state.codex_agents.clear();
+                    state.codex_agent_tracker = Default::default();
+                }
+                continue;
+            }
             let state = self.pane_state_mut(&pane_id);
             state.codex_agent_tracker.refresh(
                 &pane_id,
@@ -1055,6 +1062,43 @@ mod tests {
             crate::codex_agents::CodexAgentStatus::Working
         );
         assert_eq!(agents[0].started_at, Some(30));
+
+        crate::codex_agents::journal::remove_journal(&pane_id);
+    }
+
+    #[test]
+    fn refresh_codex_agents_clears_runtime_when_pane_changes_to_non_codex() {
+        let pane_id = format!("%REFRESH_CODEX_TO_CLAUDE_{}", std::process::id());
+        crate::codex_agents::journal::remove_journal(&pane_id);
+        crate::codex_agents::journal::append_lifecycle_event(
+            &pane_id,
+            "parent-1",
+            "agent-from-codex",
+            "worker",
+            crate::codex_agents::CodexAgentStatus::Working,
+            10_000,
+        )
+        .unwrap();
+        let mut pane = test_pane(&pane_id);
+        pane.agent = AgentType::Codex;
+        pane.session_id = Some("parent-1".into());
+        let mut state = state_with_panes(vec![pane]);
+
+        state.refresh_codex_agents(&HashMap::new());
+        assert_eq!(state.pane_codex_agents(&pane_id).map(<[_]>::len), Some(1));
+
+        state.repo_groups[0].panes[0].0.agent = AgentType::Claude;
+        state.refresh_codex_agents(&HashMap::new());
+
+        let runtime = state.pane_state(&pane_id).expect("pane runtime");
+        assert!(
+            runtime.codex_agents.is_empty(),
+            "a live non-Codex pane must not retain visible Codex agents",
+        );
+        assert!(
+            runtime.codex_agent_tracker.agents().is_empty(),
+            "a live non-Codex pane must not retain the prior Codex tracker cache",
+        );
 
         crate::codex_agents::journal::remove_journal(&pane_id);
     }
