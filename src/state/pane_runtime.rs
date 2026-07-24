@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::AppState;
 use crate::activity::TaskProgress;
+use crate::codex_agents::{CodexAgentInfo, CodexAgentTracker};
 use crate::codex_usage::{CodexTokenUsage, CodexUsageTracker};
 use crate::state::BottomPanel;
 
@@ -18,6 +19,8 @@ pub struct PaneRuntimeState {
     pub codex_token_usage: Option<CodexTokenUsage>,
     /// File cursor and partial-line buffer used by the one-second refresh loop.
     pub(crate) codex_usage_tracker: CodexUsageTracker,
+    pub codex_agents: Vec<CodexAgentInfo>,
+    pub(crate) codex_agent_tracker: CodexAgentTracker,
     /// Last bottom panel the user selected while this pane was focused.
     /// `None` until the active panel changes at least once. Cleaned up
     /// automatically by `prune_pane_states_to_current_panes` when the
@@ -105,6 +108,15 @@ impl AppState {
             .and_then(|state| state.codex_token_usage.as_ref())
     }
 
+    pub fn set_pane_codex_agents(&mut self, pane_id: &str, agents: Vec<CodexAgentInfo>) {
+        self.pane_state_mut(pane_id).codex_agents = agents;
+    }
+
+    pub fn pane_codex_agents(&self, pane_id: &str) -> Option<&[CodexAgentInfo]> {
+        self.pane_state(pane_id)
+            .map(|state| state.codex_agents.as_slice())
+    }
+
     pub fn set_pane_task_progress(&mut self, pane_id: &str, progress: Option<TaskProgress>) {
         self.pane_state_mut(pane_id).task_progress = progress;
     }
@@ -176,6 +188,7 @@ mod tests {
         assert!(state.task_dismissed_total.is_none());
         assert!(state.inactive_since.is_none());
         assert!(state.codex_token_usage.is_none());
+        assert!(state.codex_agents.is_empty());
         assert!(state.bottom_panel_pref.is_none());
         assert!(state.task_progress_log_mtime.is_none());
     }
@@ -247,6 +260,7 @@ mod tests {
     // ─── AppState accessors ──────────────────────────────────────────
 
     use crate::activity::TaskStatus;
+    use crate::codex_agents::{CodexAgentInfo, CodexAgentStatus};
 
     #[test]
     fn app_state_pane_accessors_round_trip_through_runtime_map() {
@@ -263,6 +277,17 @@ mod tests {
         );
         state.set_pane_task_dismissed_total(pane_id, Some(7));
         state.set_pane_inactive_since(pane_id, Some(42));
+        state.set_pane_codex_agents(
+            pane_id,
+            vec![CodexAgentInfo {
+                id: "agent-full-id".into(),
+                path: "/root/task1_review".into(),
+                fallback_agent_type: "reviewer".into(),
+                status: CodexAgentStatus::Done,
+                started_at: Some(10),
+                finished_at: Some(25),
+            }],
+        );
 
         assert_eq!(state.pane_ports(pane_id), Some(&[3000][..]));
         assert_eq!(state.pane_command(pane_id), Some("pnpm dev"));
@@ -272,6 +297,19 @@ mod tests {
         );
         assert_eq!(state.pane_task_dismissed_total(pane_id), Some(7));
         assert_eq!(state.pane_inactive_since(pane_id), Some(42));
+        assert_eq!(
+            state.pane_codex_agents(pane_id),
+            Some(
+                &[CodexAgentInfo {
+                    id: "agent-full-id".into(),
+                    path: "/root/task1_review".into(),
+                    fallback_agent_type: "reviewer".into(),
+                    status: CodexAgentStatus::Done,
+                    started_at: Some(10),
+                    finished_at: Some(25),
+                }][..]
+            ),
+        );
 
         state.clear_pane_state(pane_id);
         assert!(state.pane_state(pane_id).is_none());

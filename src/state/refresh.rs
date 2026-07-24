@@ -197,6 +197,32 @@ impl AppState {
         }
     }
 
+    fn refresh_codex_agents(&mut self, transcript_paths: &HashMap<String, String>) {
+        let panes: Vec<(String, Option<String>, Option<String>)> = self
+            .repo_groups
+            .iter()
+            .flat_map(|group| group.panes.iter())
+            .filter(|(pane, _)| pane.agent == AgentType::Codex)
+            .map(|(pane, _)| {
+                (
+                    pane.pane_id.clone(),
+                    pane.session_id.clone(),
+                    transcript_paths.get(&pane.pane_id).cloned(),
+                )
+            })
+            .collect();
+
+        for (pane_id, session_id, transcript_path) in panes {
+            let state = self.pane_state_mut(&pane_id);
+            state.codex_agent_tracker.refresh(
+                &pane_id,
+                session_id.as_deref(),
+                transcript_path.as_deref(),
+            );
+            state.codex_agents = state.codex_agent_tracker.agents().to_vec();
+        }
+    }
+
     /// Fast refresh: tmux state + activity log (called every 1s).
     /// Returns whether the sidebar's window is the active tmux window.
     pub fn refresh(&mut self) -> bool {
@@ -223,6 +249,7 @@ impl AppState {
             self.sessions.dirty = false;
         }
         self.refresh_codex_token_usage(&transcript_paths);
+        self.refresh_codex_agents(&transcript_paths);
         self.refresh_activity_data();
         window_active
     }
@@ -928,6 +955,108 @@ mod tests {
                 .collect(),
         }];
         state
+    }
+
+    #[test]
+    fn refresh_codex_agents_enriches_catalog_with_done_lifecycle() {
+        let dir = tempfile::tempdir().unwrap();
+        let transcript = dir.path().join("rollout.jsonl");
+        let pane_id = format!("%REFRESH_CODEX_AGENTS_DONE_{}", std::process::id());
+        crate::codex_agents::journal::remove_journal(&pane_id);
+        std::fs::write(
+            &transcript,
+            format!(
+                "{}\n",
+                serde_json::json!({
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "sub_agent_activity",
+                        "occurred_at_ms": 1_000,
+                        "agent_thread_id": "agent-full-id",
+                        "agent_path": "/root/task1_review",
+                        "kind": "started"
+                    }
+                })
+            ),
+        )
+        .unwrap();
+        for (status, occurred_at_ms) in [
+            (crate::codex_agents::CodexAgentStatus::Working, 10_999),
+            (crate::codex_agents::CodexAgentStatus::Done, 25_999),
+        ] {
+            crate::codex_agents::journal::append_lifecycle_event(
+                &pane_id,
+                "parent-1",
+                "agent-full-id",
+                "reviewer",
+                status,
+                occurred_at_ms,
+            )
+            .unwrap();
+        }
+        let mut pane = test_pane(&pane_id);
+        pane.agent = AgentType::Codex;
+        pane.session_id = Some("parent-1".into());
+        let mut state = state_with_panes(vec![pane]);
+        let transcript_paths =
+            HashMap::from([(pane_id.clone(), transcript.to_string_lossy().into_owned())]);
+
+        state.refresh_codex_agents(&transcript_paths);
+
+        assert_eq!(
+            state.pane_codex_agents(&pane_id),
+            Some(
+                &[crate::codex_agents::CodexAgentInfo {
+                    id: "agent-full-id".into(),
+                    path: "/root/task1_review".into(),
+                    fallback_agent_type: "reviewer".into(),
+                    status: crate::codex_agents::CodexAgentStatus::Done,
+                    started_at: Some(10),
+                    finished_at: Some(25),
+                }][..]
+            ),
+        );
+
+        crate::codex_agents::journal::remove_journal(&pane_id);
+    }
+
+    #[test]
+    fn refresh_codex_agents_keeps_journal_fallback_when_transcript_is_unreadable() {
+        let dir = tempfile::tempdir().unwrap();
+        let pane_id = format!("%REFRESH_CODEX_AGENTS_FALLBACK_{}", std::process::id());
+        crate::codex_agents::journal::remove_journal(&pane_id);
+        crate::codex_agents::journal::append_lifecycle_event(
+            &pane_id,
+            "parent-1",
+            "agent-journal-only",
+            "worker",
+            crate::codex_agents::CodexAgentStatus::Working,
+            30_999,
+        )
+        .unwrap();
+        let mut pane = test_pane(&pane_id);
+        pane.agent = AgentType::Codex;
+        pane.session_id = Some("parent-1".into());
+        let mut state = state_with_panes(vec![pane]);
+        let transcript_paths =
+            HashMap::from([(pane_id.clone(), dir.path().to_string_lossy().into_owned())]);
+
+        state.refresh_codex_agents(&transcript_paths);
+
+        let agents = state
+            .pane_codex_agents(&pane_id)
+            .expect("Codex pane runtime entry");
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].id, "agent-journal-only");
+        assert!(agents[0].path.is_empty());
+        assert_eq!(agents[0].fallback_agent_type, "worker");
+        assert_eq!(
+            agents[0].status,
+            crate::codex_agents::CodexAgentStatus::Working
+        );
+        assert_eq!(agents[0].started_at, Some(30));
+
+        crate::codex_agents::journal::remove_journal(&pane_id);
     }
 
     #[test]
