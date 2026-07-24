@@ -72,6 +72,7 @@ pub(in crate::cli::hook) fn clear_all_meta(pane: &str) {
         tmux::unset_pane_option(pane, key);
     }
     clear_run_state(pane);
+    crate::codex_agents::journal::remove_journal(pane);
 }
 
 /// Write a task-reset marker to the activity log so `parse_task_progress`
@@ -262,6 +263,16 @@ mod tests {
     fn clear_all_meta_drops_every_pane_option_we_own() {
         let _guard = tmux::test_mock::install();
         let pane = "%CLEAR_ALL";
+        crate::codex_agents::journal::remove_journal(pane);
+        crate::codex_agents::journal::append_lifecycle_event(
+            pane,
+            "parent-1",
+            "agent-a",
+            "worker",
+            crate::codex_agents::CodexAgentStatus::Working,
+            10_000,
+        )
+        .unwrap();
         for key in [
             tmux::PANE_AGENT,
             tmux::PANE_PROMPT,
@@ -304,5 +315,9 @@ mod tests {
                 "expected {key} cleared"
             );
         }
+        assert!(
+            !crate::codex_agents::journal::journal_file_path(pane).exists(),
+            "expected Codex lifecycle journal cleared"
+        );
     }
 }

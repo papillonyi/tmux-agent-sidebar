@@ -3,6 +3,7 @@ pub mod adapter;
 pub mod app;
 pub mod cli;
 pub mod clipboard;
+pub mod codex_agents;
 pub mod codex_usage;
 pub mod desktop_notification;
 pub mod event;

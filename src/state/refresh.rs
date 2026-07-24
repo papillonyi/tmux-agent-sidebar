@@ -133,6 +133,7 @@ impl AppState {
         }
 
         let _ = std::fs::remove_file(activity::log_file_path(pane_id));
+        crate::codex_agents::journal::remove_journal(pane_id);
     }
 
     fn filter_sessions_to_live_agent_panes(
@@ -876,6 +877,29 @@ mod tests {
         let filtered = AppState::filter_sessions_to_live_agent_panes(sessions, &live);
 
         assert!(filtered.is_empty());
+    }
+
+    #[test]
+    fn clear_dead_agent_metadata_removes_codex_agent_journal() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%DEAD_CODEX_JOURNAL";
+        crate::codex_agents::journal::remove_journal(pane);
+        crate::codex_agents::journal::append_lifecycle_event(
+            pane,
+            "parent-1",
+            "agent-a",
+            "worker",
+            crate::codex_agents::CodexAgentStatus::Working,
+            10_000,
+        )
+        .unwrap();
+
+        AppState::clear_dead_agent_metadata(pane);
+
+        assert!(
+            !crate::codex_agents::journal::journal_file_path(pane).exists(),
+            "dead-process cleanup must remove the Codex lifecycle journal"
+        );
     }
 
     // ─── refresh_session_names ──────────────────────────────────────

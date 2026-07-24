@@ -424,6 +424,7 @@ fn clear_agent_pane_state(pane_id: &str) {
     }
     let log_path = crate::activity::log_file_path(pane_id);
     let _ = std::fs::remove_file(log_path);
+    crate::codex_agents::journal::remove_journal(pane_id);
 }
 
 fn is_shell_command(command: &str) -> bool {
@@ -1148,6 +1149,16 @@ mod tests {
         let log = crate::activity::log_file_path(pane);
         let _ = std::fs::create_dir_all(log.parent().unwrap());
         std::fs::write(&log, "1234|Bash|pytest\n").unwrap();
+        crate::codex_agents::journal::remove_journal(pane);
+        crate::codex_agents::journal::append_lifecycle_event(
+            pane,
+            "parent-1",
+            "agent-a",
+            "worker",
+            crate::codex_agents::CodexAgentStatus::Working,
+            10_000,
+        )
+        .unwrap();
 
         let mut fields = full_fields();
         fields[pane_line_field::PANE_ID] = pane;
@@ -1173,6 +1184,10 @@ mod tests {
         assert!(
             !log.exists(),
             "codex activity log must be removed once the agent process is gone"
+        );
+        assert!(
+            !crate::codex_agents::journal::journal_file_path(pane).exists(),
+            "Codex lifecycle journal must be removed once the agent process is gone"
         );
     }
 

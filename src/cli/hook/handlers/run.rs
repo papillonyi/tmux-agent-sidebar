@@ -49,12 +49,12 @@ pub(in crate::cli::hook) fn on_stop(
         tmux::set_pane_option(pane, tmux::PANE_PROMPT_SOURCE, "response");
     }
     let bg_shell_live = !tmux::get_pane_option_value(pane, tmux::PANE_BG_CMD).is_empty();
-    // `Stop` is emitted for the parent turn, and Claude Code `Task` subagents
-    // are synchronous: once the parent reaches Stop, no child should still be
-    // running. Treat any leftover list as stale state from a missed or
-    // mismatched SubagentStop and clear it before `mark_task_reset`, whose
-    // guard intentionally skips writes while subagents are active.
-    tmux::unset_pane_option(pane, tmux::PANE_SUBAGENTS);
+    // Claude Code `Task` subagents are synchronous, so a parent Stop means any
+    // leftover active set is stale. Codex subagents can continue concurrently
+    // after the parent turn stops; their SubagentStop hooks own removal.
+    if ctx.agent != tmux::CODEX_AGENT {
+        tmux::unset_pane_option(pane, tmux::PANE_SUBAGENTS);
+    }
     if bg_shell_live {
         tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
     } else {
@@ -337,6 +337,38 @@ mod tests {
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
             Some("idle")
+        );
+    }
+
+    #[test]
+    fn on_stop_preserves_codex_subagents() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%STOP_CODEX_SUBAGENTS";
+        let subagents = "worker:agent-a;started_at=1700000000";
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, subagents);
+        let ctx = AgentContext {
+            agent: tmux::CODEX_AGENT,
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &Some("parent-1".into()),
+        };
+
+        on_stop(
+            pane,
+            &ctx,
+            "",
+            None,
+            &desktop_notification::DesktopNotificationSettings {
+                enabled: false,
+                events: Default::default(),
+            },
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
+            Some(subagents),
+            "Codex parent Stop must preserve concurrently running subagents"
         );
     }
 
