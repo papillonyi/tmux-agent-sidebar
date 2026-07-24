@@ -702,6 +702,78 @@ mod tests {
     }
 
     #[test]
+    fn inherited_parent_meta_does_not_clear_valid_child_identity() -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let parent_id = "019f930a-0000-7000-8000-000000000001";
+        let child_id = "019f930a-0000-7000-8000-000000000002";
+        let parent = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-10-00",
+            parent_id,
+        )?;
+        write_lines(
+            &parent,
+            &[activity(
+                "started",
+                child_id,
+                "/root/inherited-parent-meta",
+                10_000,
+            )],
+        )?;
+        let child = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T15-10-01",
+            child_id,
+        )?;
+        write_lines(
+            &child,
+            &[
+                child_session_meta(child_id, parent_id),
+                json!({
+                    "type": "session_meta",
+                    "payload": {
+                        "id": parent_id,
+                        "session_id": parent_id,
+                        "source": "cli",
+                        "thread_source": "cli"
+                    }
+                }),
+                child_task_started(10),
+                child_turn_interrupted(10, 30),
+            ],
+        )?;
+        let pane = unique_pane("child_inherited_parent_meta");
+        remove_journal(&pane);
+        append_lifecycle_event(
+            &pane,
+            parent_id,
+            child_id,
+            "worker",
+            CodexAgentStatus::Working,
+            20_000,
+        )?;
+
+        let mut tracker = CodexAgentTracker::default();
+        tracker.refresh(&pane, Some(parent_id), parent.to_str());
+
+        assert_eq!(
+            tracker.agents(),
+            &[CodexAgentInfo {
+                id: child_id.into(),
+                path: "/root/inherited-parent-meta".into(),
+                fallback_agent_type: "worker".into(),
+                status: CodexAgentStatus::Interrupted,
+                started_at: Some(10),
+                finished_at: Some(30),
+            }],
+        );
+        remove_journal(&pane);
+        Ok(())
+    }
+
+    #[test]
     fn child_rollout_rejects_identity_parent_and_source_mismatches() -> io::Result<()> {
         let dir = tempfile::tempdir()?;
         let parent_id = "019f9301-0000-7000-8000-000000000001";

@@ -192,7 +192,9 @@ impl ChildRolloutTracker {
         };
         match record.get("type").and_then(Value::as_str) {
             Some("session_meta") => {
-                self.validated = self.valid_session_meta(record.get("payload"));
+                if !self.validated {
+                    self.validated = self.valid_session_meta(record.get("payload"));
+                }
             }
             Some("event_msg") if self.validated => {
                 self.fold_lifecycle_event(record.get("payload"));
