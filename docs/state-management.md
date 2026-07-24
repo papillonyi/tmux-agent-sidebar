@@ -32,7 +32,7 @@ Both options also accept six-digit RGB values through the normal theme parser.
 
 Written by `cli/hook.rs` on agent events, read by `query_sessions()` every **1 second**.
 
-Each pane's runtime data is split into two buckets:
+Each pane's runtime data comes from three sources:
 
 | Source | Update Trigger | Description |
 |--------|----------------|-------------|
