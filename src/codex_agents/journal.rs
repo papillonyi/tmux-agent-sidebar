@@ -198,6 +198,12 @@ impl JournalTracker {
         };
 
         if let Some(current) = self.snapshots.get_mut(agent_id) {
+            if occurred_at_ms < current.last_event_at_ms {
+                if incoming_status == AgentStatus::Working {
+                    current.started_at_ms.get_or_insert(occurred_at_ms);
+                }
+                return;
+            }
             current.agent_type = agent_type.to_owned();
             current.last_event_at_ms = occurred_at_ms;
             match incoming_status {
@@ -374,6 +380,35 @@ mod tests {
         assert_eq!(snapshot.status, AgentStatus::Working);
         assert_eq!(snapshot.started_at_ms, Some(40_000));
         assert_eq!(snapshot.finished_at_ms, None);
+
+        remove_journal(&pane);
+        Ok(())
+    }
+
+    #[test]
+    fn out_of_order_start_does_not_regress_newer_done_status() -> io::Result<()> {
+        let pane = unique_pane("out_of_order_start");
+        remove_journal(&pane);
+        for (status, occurred_at_ms) in
+            [(AgentStatus::Done, 25_000), (AgentStatus::Working, 10_000)]
+        {
+            append_lifecycle_event(
+                &pane,
+                "parent-1",
+                "agent-a",
+                "worker",
+                status,
+                occurred_at_ms,
+            )?;
+        }
+
+        let mut tracker = tracker_for(&pane, "parent-1");
+        tracker.refresh()?;
+        let snapshot = tracker.snapshots().get("agent-a").expect("agent-a");
+        assert_eq!(snapshot.status, AgentStatus::Done);
+        assert_eq!(snapshot.started_at_ms, Some(10_000));
+        assert_eq!(snapshot.finished_at_ms, Some(25_000));
+        assert_eq!(snapshot.last_event_at_ms, 25_000);
 
         remove_journal(&pane);
         Ok(())
