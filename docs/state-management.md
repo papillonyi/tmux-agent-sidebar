@@ -38,6 +38,7 @@ Each pane's runtime data is split into two buckets:
 |--------|----------------|-------------|
 | tmux pane options | Event-driven + cleanup on agent exit | Agent type, status, cwd, permission mode, prompt, subagents, worktree, etc. |
 | `PaneRuntimeState` in `AppState` | Refresh cycle + cleanup on agent exit | `ports`, `command`, `task_progress`, Codex token usage/tracker, `task_dismissed_total`, `inactive_since` |
+| Codex lifecycle journal | SubagentStart/Stop hooks | Versioned, flock-protected JSONL transitions keyed by pane, parent session id, and full child id |
 
 Pane options written to tmux:
 
@@ -57,7 +58,7 @@ Pane options written to tmux:
 | `@pane_worktree_name` | SessionStart | Worktree name (if applicable) |
 | `@pane_worktree_branch` | SessionStart | Worktree branch (if applicable) |
 | `@pane_session_id` | SessionStart, UserPromptSubmit, Notification, Stop, StopFailure, PermissionDenied, CwdChanged | Agent-reported session id (skipped when subagents are active) |
-| `@pane_transcript_path` | Any recognized Codex hook; cleared on a SessionStart without a path and on agent exit | Agent-reported rollout JSONL path used for best-effort token usage reads (skipped when subagents are active) |
+| `@pane_transcript_path` | Parent Codex events only (`SubagentStart`/`SubagentStop` explicitly excluded); cleared on a SessionStart without a path and on agent exit | Agent-reported rollout JSONL path used for best-effort token usage reads |
 
 `Notification`, `PermissionDenied`, and `TeammateIdle` write a fresh
 `action_required` event. A normal `Stop` writes `completed` only when no live
@@ -87,6 +88,8 @@ pane disappears (`prune_pane_states_to_current_panes`).
 | `pane_states.map[...].task_progress_log_mtime` | Every 1s (refresh cycle) | mtime of the task-progress log last parsed; skips re-parsing when unchanged |
 | `pane_states.map[...].codex_token_usage` | Every 1s (refresh cycle) | Latest cumulative token count, last-call context footprint, and model context window parsed from a Codex `token_count` event |
 | `pane_states.map[...].codex_usage_tracker` | Every 1s (refresh cycle) | Transcript path, mtime, byte offset, and partial-line buffer used to read only appended Codex JSONL data; first read is limited to the last 256 KiB |
+| `pane_states.map[...].codex_agents` | Every 1s (refresh cycle) | Merged `/agent`-style rows refreshed from the parent transcript and lifecycle journal |
+| `pane_states.map[...].codex_agent_tracker` | Every 1s (refresh cycle) | Incremental parent transcript and lifecycle-journal cursors plus cached catalog and state |
 
 Per-pane file-based state:
 
@@ -94,6 +97,10 @@ Per-pane file-based state:
 |------|---------------|----------------|-------------|
 | `/tmp/tmux-agent-activity_{pane_id}.log` | Each ActivityLog event | Every 1s | Tool usage log (`HH:MM\|tool\|label`), max 200 lines |
 | Codex rollout JSONL at `@pane_transcript_path` | Codex process | Every 1s (mtime/offset gated) | Best-effort source for cumulative token usage and context percentage. Codex documents `transcript_path` in hook input, but the transcript record schema is not a stable interface; missing or malformed records are ignored. |
+| `/tmp/tmux-agent-agents_{pane_id}.jsonl` | Codex SubagentStart/Stop hooks | Every 1s (offset gated) | Lifecycle journal for retained Codex child states. Records are folded only when their parent session id matches the pane's current `@pane_session_id`, so stale records are isolated before cleanup. |
+
+Normal metadata teardown, dead-process cleanup, and the shell fallback all remove
+the Codex lifecycle journal together with other per-pane files.
 
 ### Local State (single sidebar process only)
 
