@@ -32,13 +32,17 @@ Both options also accept six-digit RGB values through the normal theme parser.
 
 Written by `cli/hook.rs` on agent events, read by `query_sessions()` every **1 second**.
 
-Each pane's runtime data comes from three sources:
+Each pane's core runtime record is split across two storage buckets:
 
 | Source | Update Trigger | Description |
 |--------|----------------|-------------|
 | tmux pane options | Event-driven + cleanup on agent exit | Agent type, status, cwd, permission mode, prompt, subagents, worktree, etc. |
 | `PaneRuntimeState` in `AppState` | Refresh cycle + cleanup on agent exit | `ports`, `command`, `task_progress`, Codex token usage/tracker, `task_dismissed_total`, `inactive_since` |
-| Codex lifecycle journal | SubagentStart/Stop hooks | Versioned, flock-protected JSONL transitions keyed by pane, parent session id, and full child id |
+
+Codex agent rows additionally merge three distinct file inputs: the parent
+Codex rollout, discovered per-child Codex rollouts, and the plugin-owned
+lifecycle journal. These inputs enrich `PaneRuntimeState`; they are not
+additional pane-record storage buckets.
 
 Pane options written to tmux:
 
@@ -88,19 +92,21 @@ pane disappears (`prune_pane_states_to_current_panes`).
 | `pane_states.map[...].task_progress_log_mtime` | Every 1s (refresh cycle) | mtime of the task-progress log last parsed; skips re-parsing when unchanged |
 | `pane_states.map[...].codex_token_usage` | Every 1s (refresh cycle) | Latest cumulative token count, last-call context footprint, and model context window parsed from a Codex `token_count` event |
 | `pane_states.map[...].codex_usage_tracker` | Every 1s (refresh cycle) | Transcript path, mtime, byte offset, and partial-line buffer used to read only appended Codex JSONL data; first read is limited to the last 256 KiB |
-| `pane_states.map[...].codex_agents` | Every 1s (refresh cycle) | Merged `/agent`-style rows refreshed from the parent transcript and lifecycle journal |
-| `pane_states.map[...].codex_agent_tracker` | Every 1s (refresh cycle) | Incremental parent transcript and lifecycle-journal cursors plus cached catalog and state |
+| `pane_states.map[...].codex_agents` | Every 1s (refresh cycle) | Merged `/agent`-style rows refreshed from the parent and per-child Codex rollouts plus the lifecycle journal |
+| `pane_states.map[...].codex_agent_tracker` | Every 1s (refresh cycle) | Parent and child rollout paths/cursors; child `session_meta` validation state; cached lifecycle transitions; bounded child-rollout discovery retry state; and the lifecycle-journal cursor/cache |
 
 Per-pane file-based state:
 
 | File | Update Trigger | Read Frequency | Description |
 |------|---------------|----------------|-------------|
 | `/tmp/tmux-agent-activity_{pane_id}.log` | Each ActivityLog event | Every 1s | Tool usage log (`HH:MM\|tool\|label`), max 200 lines |
-| Codex rollout JSONL at `@pane_transcript_path` | Codex process | Every 1s (mtime/offset gated) | Best-effort source for cumulative token usage and context percentage. Codex documents `transcript_path` in hook input, but the transcript record schema is not a stable interface; missing or malformed records are ignored. |
+| Parent Codex rollout JSONL at `@pane_transcript_path` | Codex process | Every 1s (mtime/offset gated) | Best-effort source for cumulative token usage, context percentage, child catalog/order, interruption events, and successful closes. Codex documents `transcript_path` in hook input, but the transcript record schema is not a stable interface; missing or malformed records are ignored. |
+| Discovered per-child Codex rollout JSONL files | Codex process | Every 1s (offset gated after bounded discovery retries) | Validated against the child id, parent session, and child `session_meta`; supplies child task-started, completed, and interrupted lifecycle transitions, including for journal-only child ids. |
 | `/tmp/tmux-agent-agents_{pane_id}.jsonl` | Codex SubagentStart/Stop hooks | Every 1s (offset gated) | Lifecycle journal for retained Codex child states. Records are folded only when their parent session id matches the pane's current `@pane_session_id`, so stale records are isolated before cleanup. |
 
-Normal metadata teardown, dead-process cleanup, and the shell fallback all remove
-the Codex lifecycle journal together with other per-pane files.
+Normal metadata teardown, dead-process cleanup, and the shell fallback remove
+the plugin-owned lifecycle journal and discard the in-memory Codex agent
+tracker/cache. They never delete Codex-owned parent or child rollout files.
 
 ### Local State (single sidebar process only)
 
