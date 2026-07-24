@@ -233,6 +233,7 @@ fn subagent_start() {
             agent_type: "Explore".into(),
             agent_id: None,
             session_id: None,
+            model: None,
         }
     );
 }
@@ -251,6 +252,7 @@ fn subagent_start_captures_agent_id() {
             agent_type: "Explore".into(),
             agent_id: Some("sub-42".into()),
             session_id: Some("claude-parent".into()),
+            model: None,
         }
     );
 }
@@ -271,6 +273,7 @@ fn subagent_stop() {
             agent_type: "Plan".into(),
             agent_id: None,
             session_id: None,
+            model: None,
             last_message: "".into(),
             transcript_path: "".into(),
         }
@@ -293,6 +296,7 @@ fn subagent_stop_captures_full_payload() {
             agent_type: "Explore".into(),
             agent_id: Some("sub-42".into()),
             session_id: Some("claude-parent".into()),
+            model: None,
             last_message: "Found the bug at main.rs:42".into(),
             transcript_path: "/tmp/sub-transcript.json".into(),
         }

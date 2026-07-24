@@ -56,6 +56,7 @@ pub(super) fn render_pane_lines_with_ports(
         task_progress,
         None,
         None,
+        None,
         selected,
         active,
         width,
@@ -74,6 +75,7 @@ pub(super) fn render_pane_lines_with_runtime(
     task_progress: Option<&crate::activity::TaskProgress>,
     token_usage: Option<&crate::codex_usage::CodexTokenUsage>,
     codex_agents: Option<&[crate::codex_agents::AgentRecord]>,
+    codex_main_model: Option<&str>,
     selected: bool,
     active: bool,
     width: usize,
@@ -167,7 +169,13 @@ pub(super) fn render_pane_lines_with_runtime(
     }
     if pane.agent == AgentType::Codex {
         if let Some(agents) = codex_agents.filter(|agents| !agents.is_empty()) {
-            out.extend(codex_agent_rows(agents, ctx, now));
+            out.extend(codex_agent_rows(
+                agents,
+                codex_main_model,
+                pane.started_at,
+                ctx,
+                now,
+            ));
         } else {
             out.extend(subagent_rows(&pane.subagents, ctx, now));
         }
@@ -715,41 +723,31 @@ mod tests {
     }
 
     #[test]
-    fn codex_agent_rows_show_main_and_retained_lifecycle_history() {
+    fn codex_agent_rows_render_two_lines_for_main_and_active_children() {
         let theme = ColorTheme::default();
         let ctx = test_ctx(&theme, 72, false);
         let agents = vec![
             AgentRecord {
-                internal_id: "019f9260-1111-2222-3333-444444444444".into(),
-                display_name: "/root/task1_owner_contract".into(),
-                status: AgentStatus::Done,
-                started_at: Some(100),
-                finished_at: Some(265),
-            },
-            AgentRecord {
                 internal_id: "019f9264-1111-2222-3333-444444444444".into(),
                 display_name: "/root/task2_owner_propagation".into(),
+                role: "worker".into(),
+                model: "gpt-5.6-terra".into(),
                 status: AgentStatus::Working,
                 started_at: Some(200),
                 finished_at: None,
             },
             AgentRecord {
-                internal_id: "019f9267-1111-2222-3333-444444444444".into(),
-                display_name: "/root/task2_review".into(),
-                status: AgentStatus::Interrupted,
-                started_at: Some(210),
-                finished_at: Some(280),
-            },
-            AgentRecord {
-                internal_id: "019f9268-1111-2222-3333-444444444444".into(),
-                display_name: "/root/task3_builder".into(),
-                status: AgentStatus::Unknown,
-                started_at: None,
+                internal_id: "019f92f5-0d85-7172-b8c6-b5056ac41d3e".into(),
+                display_name: "/root/task6_implement/lifecycle_probe_alpha".into(),
+                role: "default".into(),
+                model: "gpt-5.6-terra".into(),
+                status: AgentStatus::Working,
+                started_at: Some(260),
                 finished_at: None,
             },
         ];
 
-        let rows = body::codex_agent_rows(&agents, &ctx, 325);
+        let rows = body::codex_agent_rows(&agents, Some("gpt-5.6-sol"), Some(100), &ctx, 325);
         let output = rows
             .iter()
             .map(line_text)
@@ -758,24 +756,20 @@ mod tests {
             .join("\n");
 
         insta::assert_snapshot!(output, @"
-        ├ Main [default] (current)
-        ├ /root/task1_owner_contract                              ✓ done 2m45s
-        ├ /root/task2_owner_propagation                         ● working 2m5s
-        ├ /root/task2_review                                     ○ interrupted
-        └ /root/task3_builder                                        ? unknown
+        ├ Main (current)
+        │  ● working 3m45s · default · gpt-5.6-sol
+        ├ /root/task2_owner_propagation
+        │  ● working 2m5s · worker · gpt-5.6-terra
+        └ /root/task6_implement/lifecycle_probe_alpha
+           ● working 1m5s · default · gpt-5.6-terra
         ");
-        for (row_index, status, expected_color) in [
-            (1, "✓ done", theme.status_idle),
-            (2, "● working", theme.status_running),
-            (3, "○ interrupted", theme.status_waiting),
-            (4, "? unknown", theme.status_unknown),
-        ] {
+        for row_index in [1, 3, 5] {
             let status_span = rows[row_index]
                 .spans
                 .iter()
-                .find(|span| span.content == status)
+                .find(|span| span.content == "● working")
                 .expect("status span should remain independently styled");
-            assert_eq!(status_span.style.fg, Some(expected_color));
+            assert_eq!(status_span.style.fg, Some(theme.status_running));
         }
     }
 
@@ -786,17 +780,26 @@ mod tests {
         let agents = vec![AgentRecord {
             internal_id: "019f9260-1111-2222-3333-444444444444".into(),
             display_name: "/root/task1_owner_contract".into(),
-            status: AgentStatus::Done,
+            role: "worker".into(),
+            model: "gpt-5.6-terra".into(),
+            status: AgentStatus::Working,
             started_at: Some(100),
-            finished_at: Some(265),
+            finished_at: None,
         }];
 
-        let rows = body::codex_agent_rows(&agents, &ctx, 325);
-        let output = rows.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        let rows = body::codex_agent_rows(&agents, Some("gpt-5.6-sol"), Some(100), &ctx, 325);
+        let output = rows
+            .iter()
+            .map(line_text)
+            .map(|line| line.trim_end().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n");
 
         insta::assert_snapshot!(output, @"
-        ├ Main [defau…
-        └ /roo… ✓ done
+        ├ Main (curre…
+        │  ● working
+        └ /root/task1…
+           ● working
         ");
     }
 
@@ -807,15 +810,17 @@ mod tests {
         let agents = vec![AgentRecord {
             internal_id: "019f9260-1111-2222-3333-444444444444".into(),
             display_name: "worker".into(),
-            status: AgentStatus::Done,
+            role: "worker".into(),
+            model: "gpt-5.6-terra".into(),
+            status: AgentStatus::Working,
             started_at: None,
             finished_at: None,
         }];
 
-        let rows = body::codex_agent_rows(&agents, &ctx, 325);
+        let rows = body::codex_agent_rows(&agents, Some("gpt-5.6-sol"), Some(100), &ctx, 325);
         let output = line_text(&rows[0]);
 
-        insta::assert_snapshot!(output, @"    ├ Main [de…");
+        insta::assert_snapshot!(output, @"    ├ Main (cu…");
     }
 
     #[test]
@@ -825,15 +830,17 @@ mod tests {
         let agents = vec![AgentRecord {
             internal_id: "019f9260-1111-2222-3333-444444444444".into(),
             display_name: "工作路径".into(),
-            status: AgentStatus::Done,
+            role: "worker".into(),
+            model: "gpt-5.6-terra".into(),
+            status: AgentStatus::Working,
             started_at: None,
             finished_at: None,
         }];
 
-        let rows = body::codex_agent_rows(&agents, &ctx, 325);
-        let output = line_text(&rows[1]);
+        let rows = body::codex_agent_rows(&agents, Some("gpt-5.6-sol"), Some(100), &ctx, 325);
+        let output = line_text(&rows[2]);
 
-        insta::assert_snapshot!(output, @"    └ 工作路径   ✓ done");
+        insta::assert_snapshot!(output, @"    └ 工作路径");
     }
 
     #[test]
@@ -843,15 +850,17 @@ mod tests {
         let agents = vec![AgentRecord {
             internal_id: "019f9260-1111-2222-3333-444444444444".into(),
             display_name: "工作路径".into(),
-            status: AgentStatus::Done,
+            role: "worker".into(),
+            model: "gpt-5.6-terra".into(),
+            status: AgentStatus::Working,
             started_at: Some(100),
-            finished_at: Some(265),
+            finished_at: None,
         }];
 
-        let rows = body::codex_agent_rows(&agents, &ctx, 325);
-        let output = line_text(&rows[1]);
+        let rows = body::codex_agent_rows(&agents, Some("gpt-5.6-sol"), Some(100), &ctx, 325);
+        let output = line_text(&rows[3]);
 
-        insta::assert_snapshot!(output, @"    └ 工作路径   ✓ done 2m45s");
+        insta::assert_snapshot!(output, @"       ● working 3m45s");
     }
 
     #[test]
@@ -861,12 +870,14 @@ mod tests {
         let agents = vec![AgentRecord {
             internal_id: "019f9264-1111-2222-3333-444444444444".into(),
             display_name: "worker".into(),
+            role: "worker".into(),
+            model: "gpt-5.6-terra".into(),
             status: AgentStatus::Working,
             started_at: Some(200),
             finished_at: None,
         }];
 
-        let rows = body::codex_agent_rows(&agents, &ctx, 325);
+        let rows = body::codex_agent_rows(&agents, Some("gpt-5.6-sol"), Some(100), &ctx, 325);
         let output = rows
             .iter()
             .map(line_text)
@@ -875,8 +886,10 @@ mod tests {
             .join("\n");
 
         insta::assert_snapshot!(output, @"
-            ├ Main [default] (current)
-            └ worker                ● working 2m5s
+            ├ Main (current)
+            │  ● working 3m45s · default
+            └ worker
+               ● working 2m5s · worker
         ");
     }
 

@@ -33,7 +33,7 @@
 - Consumes: child `session_meta`, child `turn_context`, child lifecycle events, and parent `turn_context`.
 - Produces: `ChildMetadata { display_name, role, model }`, child lifecycle snapshots, and `TranscriptTracker::main_model()`.
 
-- [ ] **Step 1: Write failing nested-validation and metadata tests**
+- [x] **Step 1: Write failing nested-validation and metadata tests**
 
 Add tests proving that a depth-two child is valid when its exact child ID and
 root `session_id` match even though its immediate `parent_thread_id` differs:
@@ -72,7 +72,7 @@ valid `turn_context.model` becomes `main_model()`.
 Retain negative cases for wrong root `session_id`, missing child ID,
 non-subagent sources, and non-string relationship fields.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run:
 
@@ -84,7 +84,7 @@ Expected: the depth-two validation or new metadata/model assertions fail
 because current validation requires the immediate parent to equal the root and
 does not retain role or model.
 
-- [ ] **Step 3: Implement child and parent metadata extraction**
+- [x] **Step 3: Implement child and parent metadata extraction**
 
 Introduce:
 
@@ -105,7 +105,7 @@ allowing a non-empty immediate parent ID that differs from the root.
 Replace the separate child-name map with a child-metadata map. Parse the latest
 sanitized parent `turn_context.model` into `TranscriptTracker.main_model`.
 
-- [ ] **Step 4: Run focused tests and verify GREEN**
+- [x] **Step 4: Run focused tests and verify GREEN**
 
 Run:
 
@@ -127,7 +127,7 @@ Expected: all transcript tests pass.
 - Consumes: optional `model` from official Codex `SubagentStart` and `SubagentStop` hook payloads.
 - Produces: optional model in the plugin-owned lifecycle snapshot, while remaining compatible with existing version-1 journal lines.
 
-- [ ] **Step 1: Write failing adapter and journal tests**
+- [x] **Step 1: Write failing adapter and journal tests**
 
 Extend Codex adapter expectations to require:
 
@@ -144,7 +144,7 @@ Add journal coverage for a version-1 line with `"model":"gpt-5.6-terra"` and
 for an older version-1 line without `model`. The first must retain the model;
 the second must parse successfully with `model == None`.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run:
 
@@ -157,7 +157,7 @@ cargo test cli::hook --lib
 Expected: compilation or assertion failure because the event and journal
 types do not contain model.
 
-- [ ] **Step 3: Implement optional model propagation**
+- [x] **Step 3: Implement optional model propagation**
 
 Add `model: Option<String>` to Codex subagent lifecycle variants, read it with
 `optional_str(input, "model")`, pass it to `append_lifecycle_event`, write it
@@ -166,7 +166,7 @@ as an optional journal field, and retain it in `LifecycleSnapshot`.
 Keep `JOURNAL_VERSION` at `1`: absent model remains valid, and additional
 optional JSON fields are backward compatible.
 
-- [ ] **Step 4: Run focused tests and verify GREEN**
+- [x] **Step 4: Run focused tests and verify GREEN**
 
 Run:
 
@@ -189,7 +189,7 @@ Expected: all selected tests pass.
 - Consumes: merged catalog, journal, child lifecycle, child metadata, and parent model.
 - Produces: `AgentRecord { internal_id, display_name, role, model, status, started_at, finished_at }` for working children only, plus pane-level `codex_main_model`.
 
-- [ ] **Step 1: Write failing normalization and state tests**
+- [x] **Step 1: Write failing normalization and state tests**
 
 Extend expected records with:
 
@@ -210,7 +210,7 @@ model: child model > hook model > parent model > "unknown"
 Add a runtime refresh assertion that `codex_main_model` is populated from the
 parent rollout.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run:
 
@@ -223,7 +223,7 @@ cargo test state::refresh::tests::refresh_codex_agents --lib
 Expected: compilation or assertion failure because records have no role/model,
 terminal records remain published, and runtime state has no parent model.
 
-- [ ] **Step 3: Implement normalization and active-only filtering**
+- [x] **Step 3: Implement normalization and active-only filtering**
 
 Add `role` and `model` strings to `AgentRecord`. Resolve metadata inside
 `merge_record`, then append the record only when:
@@ -236,7 +236,7 @@ Expose `CodexAgentTracker::main_model() -> Option<&str>`, copy it into
 `PaneRuntimeState.codex_main_model`, and clear it with other Codex runtime
 state on pane/session changes.
 
-- [ ] **Step 4: Run focused tests and verify GREEN**
+- [x] **Step 4: Run focused tests and verify GREEN**
 
 Run:
 
@@ -260,7 +260,7 @@ Expected: all selected tests pass.
 - Consumes: working `AgentRecord` values, `codex_main_model`, pane start timestamp, and current time.
 - Produces: two rows for Main and two rows for each active child.
 
-- [ ] **Step 1: Change inline snapshots first**
+- [x] **Step 1: Change inline snapshots first**
 
 Replace historical Codex snapshots with active-only data and expect:
 
@@ -275,7 +275,7 @@ Add a narrow inline snapshot proving that status remains visible before
 elapsed time, role, and model are omitted or truncated. Assert that every
 rendered line maps to the owning pane.
 
-- [ ] **Step 2: Run UI tests and verify RED**
+- [x] **Step 2: Run UI tests and verify RED**
 
 Run:
 
@@ -286,7 +286,7 @@ cargo test codex_agent_history --test ui_snapshot
 
 Expected: snapshot mismatches show the old one-line historical layout.
 
-- [ ] **Step 3: Implement the two-line renderer**
+- [x] **Step 3: Implement the two-line renderer**
 
 Change `codex_agent_rows` to accept the Main model and pane start timestamp.
 For each entry, render an identity line and a metadata line. Use tree
@@ -304,7 +304,7 @@ Apply running color to the status, active-text color to elapsed time, and
 muted/subagent colors to role/model. Truncate only within the available inner
 width and never expose `internal_id`.
 
-- [ ] **Step 4: Run UI tests and verify GREEN**
+- [x] **Step 4: Run UI tests and verify GREEN**
 
 Run:
 
@@ -326,7 +326,7 @@ Expected: all selected snapshots pass.
 - Consumes: final implementation and verification output.
 - Produces: updated source contract, a scoped Git commit, and the release binary used by the symlinked tmux plugin.
 
-- [ ] **Step 1: Update state documentation**
+- [x] **Step 1: Update state documentation**
 
 Document:
 
@@ -340,7 +340,7 @@ hook journal + parent rollout + validated child rollout
 State that terminal child records are retained only as merge inputs and never
 published to the UI.
 
-- [ ] **Step 2: Run repository verification**
+- [x] **Step 2: Run repository verification**
 
 Run:
 
@@ -354,7 +354,7 @@ cargo build --release
 
 Expected: every command exits with status 0.
 
-- [ ] **Step 3: Review and commit the scoped diff**
+- [x] **Step 3: Review and commit the scoped diff**
 
 Run:
 
@@ -367,7 +367,7 @@ git diff --stat
 Stage only files listed by this plan, confirm `.idea/` is absent from the
 index, and create the implementation commit after the final `cargo fmt`.
 
-- [ ] **Step 4: Refresh the local tmux client**
+- [x] **Step 4: Refresh the local tmux client**
 
 Because the plugin directory is symlinked to this checkout, the release build
 is already the deployed binary. Run:

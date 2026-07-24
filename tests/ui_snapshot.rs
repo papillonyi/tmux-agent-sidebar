@@ -1619,55 +1619,48 @@ fn snapshot_focused_codex_pane_uses_accent_enclosure() {
 }
 
 #[test]
-fn snapshot_codex_agent_history_matches_agent_panel_ui() {
+fn snapshot_codex_active_agents_use_two_line_rows_ui() {
     let mut pane = make_pane(AgentType::Codex, PaneStatus::Running);
     pane.session_id = Some("019f920c-bee2-7980-9ab1-0476552b63c8".into());
+    pane.started_at = Some(FIXED_NOW - 8_820);
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
+    state.set_pane_codex_main_model("%1", Some("gpt-5.6-sol".into()));
     state.set_pane_codex_agents(
         "%1",
         vec![
             AgentRecord {
-                internal_id: "019f9260-1111-2222-3333-444444444444".into(),
-                display_name: "/root/task1_owner_contract".into(),
-                status: AgentStatus::Done,
-                started_at: Some(FIXED_NOW - 300),
-                finished_at: Some(FIXED_NOW - 135),
-            },
-            AgentRecord {
-                internal_id: "019f9264-1111-2222-3333-444444444444".into(),
-                display_name: "/root/task2_owner_propagation".into(),
+                internal_id: "019f92f5-0d85-7172-b8c6-b5056ac41d3e".into(),
+                display_name: "/root/task6_implement/lifecycle_probe_alpha".into(),
+                role: "default".into(),
+                model: "gpt-5.6-terra".into(),
                 status: AgentStatus::Working,
-                started_at: Some(FIXED_NOW - 125),
+                started_at: Some(FIXED_NOW - 83),
                 finished_at: None,
             },
             AgentRecord {
                 internal_id: "019f9267-1111-2222-3333-444444444444".into(),
-                display_name: "/root/task2_review".into(),
-                status: AgentStatus::Interrupted,
-                started_at: Some(FIXED_NOW - 200),
-                finished_at: Some(FIXED_NOW - 100),
-            },
-            AgentRecord {
-                internal_id: "019f9268-1111-2222-3333-444444444444".into(),
-                display_name: "/root/task3_builder".into(),
-                status: AgentStatus::Unknown,
-                started_at: None,
+                display_name: "/root/task6_review".into(),
+                role: "worker".into(),
+                model: "gpt-5.6-terra".into(),
+                status: AgentStatus::Working,
+                started_at: Some(FIXED_NOW - 42),
                 finished_at: None,
             },
         ],
     );
 
-    let output = render_to_string(&mut state, 64, 30);
+    let output = render_to_string(&mut state, 64, 32);
     insta::assert_snapshot!(output, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                                                            — ▾
     project
-    ┃ ● codex                                                      ┃
-    ┃   ├ Main [default] (current)                                 ┃
-    ┃   ├ /root/task1_owner_contract                   ✓ done 2m45s┃
-    ┃   ├ /root/task2_owner_propagation              ● working 2m5s┃
-    ┃   ├ /root/task2_review                          ○ interrupted┃
-    ┃   └ /root/task3_builder                             ? unknown┃
+    ┃ ● codex                                               2h27m0s┃
+    ┃   ├ Main (current)                                           ┃
+    ┃   │  ● working 2h27m0s · default · gpt-5.6-sol               ┃
+    ┃   ├ /root/task6_implement/lifecycle_probe_alpha              ┃
+    ┃   │  ● working 1m23s · default · gpt-5.6-terra               ┃
+    ┃   └ /root/task6_review                                       ┃
+    ┃      ● working 42s · worker · gpt-5.6-terra                  ┃
     ╭ Git ─────────────────────────────────────────────────────────╮
     │                      Working tree clean                      │
     ╰──────────────────────────────────────────────────────────────╯
@@ -1682,61 +1675,41 @@ fn snapshot_codex_agent_history_matches_agent_panel_ui() {
             .iter()
             .filter(|mapping| **mapping == Some(0))
             .count(),
-        6,
-        "status plus five agent rows should share the pane selection target",
+        7,
+        "status plus six Main/agent lines should share the pane selection target",
     );
 }
 
 #[test]
-fn snapshot_codex_agent_history_narrow_ui() {
+fn snapshot_codex_active_agents_narrow_ui() {
     let mut pane = make_pane(AgentType::Codex, PaneStatus::Running);
     pane.session_id = Some("019f920c-bee2-7980-9ab1-0476552b63c8".into());
+    pane.started_at = Some(FIXED_NOW - 8_820);
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
+    state.set_pane_codex_main_model("%1", Some("gpt-5.6-sol".into()));
     state.set_pane_codex_agents(
         "%1",
-        vec![
-            AgentRecord {
-                internal_id: "019f9260-1111-2222-3333-444444444444".into(),
-                display_name: "/root/task1_owner_contract".into(),
-                status: AgentStatus::Done,
-                started_at: Some(FIXED_NOW - 300),
-                finished_at: Some(FIXED_NOW - 135),
-            },
-            AgentRecord {
-                internal_id: "019f9264-1111-2222-3333-444444444444".into(),
-                display_name: "/root/task2_owner_propagation".into(),
-                status: AgentStatus::Working,
-                started_at: Some(FIXED_NOW - 125),
-                finished_at: None,
-            },
-            AgentRecord {
-                internal_id: "019f9267-1111-2222-3333-444444444444".into(),
-                display_name: "/root/task2_review".into(),
-                status: AgentStatus::Interrupted,
-                started_at: Some(FIXED_NOW - 200),
-                finished_at: Some(FIXED_NOW - 100),
-            },
-            AgentRecord {
-                internal_id: "019f9268-1111-2222-3333-444444444444".into(),
-                display_name: "/root/task3_builder".into(),
-                status: AgentStatus::Unknown,
-                started_at: None,
-                finished_at: None,
-            },
-        ],
+        vec![AgentRecord {
+            internal_id: "019f92f5-0d85-7172-b8c6-b5056ac41d3e".into(),
+            display_name: "/root/task6_implement/lifecycle_probe_alpha".into(),
+            role: "default".into(),
+            model: "gpt-5.6-terra".into(),
+            status: AgentStatus::Working,
+            started_at: Some(FIXED_NOW - 83),
+            finished_at: None,
+        }],
     );
 
-    let output = render_to_string(&mut state, 32, 30);
+    let output = render_to_string(&mut state, 32, 32);
     insta::assert_snapshot!(output, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                            — ▾
     project
-    ┃ ● codex                      ┃
-    ┃   ├ Main [default] (current) ┃
-    ┃   ├ /root/task1… ✓ done 2m45s┃
-    ┃   ├ /root/tas… ● working 2m5s┃
-    ┃   ├ /root/task… ○ interrupted┃
-    ┃   └ /root/task3_bu… ? unknown┃
+    ┃ ● codex               2h27m0s┃
+    ┃   ├ Main (current)           ┃
+    ┃   │  ● working 2h27m0s       ┃
+    ┃   └ /root/task6_implement/li…┃
+    ┃      ● working 1m23s         ┃
     ╭ Git ─────────────────────────╮
     │      Working tree clean      │
     ╰──────────────────────────────╯

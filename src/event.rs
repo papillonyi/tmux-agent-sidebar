@@ -77,11 +77,13 @@ pub enum AgentEvent {
         agent_type: String,
         agent_id: Option<String>,
         session_id: Option<String>,
+        model: Option<String>,
     },
     SubagentStop {
         agent_type: String,
         agent_id: Option<String>,
         session_id: Option<String>,
+        model: Option<String>,
         last_message: String,
         transcript_path: String,
     },

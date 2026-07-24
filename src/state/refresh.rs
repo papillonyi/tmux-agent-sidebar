@@ -216,6 +216,7 @@ impl AppState {
             if !is_codex {
                 if let Some(state) = self.pane_states.get_mut(&pane_id) {
                     state.codex_agents.clear();
+                    state.codex_main_model = None;
                     state.codex_agent_tracker = Default::default();
                 }
                 continue;
@@ -226,6 +227,7 @@ impl AppState {
                 session_id.as_deref(),
                 transcript_path.as_deref(),
             );
+            state.codex_main_model = state.codex_agent_tracker.main_model().map(str::to_owned);
             state.codex_agents = state.codex_agent_tracker.records().to_vec();
         }
     }
@@ -973,7 +975,13 @@ mod tests {
         std::fs::write(
             &transcript,
             format!(
-                "{}\n",
+                "{}\n{}\n",
+                serde_json::json!({
+                    "type": "turn_context",
+                    "payload": {
+                        "model": "gpt-5.6-sol"
+                    }
+                }),
                 serde_json::json!({
                     "type": "event_msg",
                     "payload": {
@@ -983,7 +991,7 @@ mod tests {
                         "agent_path": "/root/task1_review",
                         "kind": "started"
                     }
-                })
+                }),
             ),
         )
         .unwrap();
@@ -1010,18 +1018,8 @@ mod tests {
 
         state.refresh_codex_agents(&transcript_paths);
 
-        assert_eq!(
-            state.pane_codex_agents(&pane_id),
-            Some(
-                &[crate::codex_agents::AgentRecord {
-                    internal_id: "agent-full-id".into(),
-                    display_name: "/root/task1_review".into(),
-                    status: crate::codex_agents::AgentStatus::Done,
-                    started_at: Some(10),
-                    finished_at: Some(25),
-                }][..]
-            ),
-        );
+        assert_eq!(state.pane_codex_agents(&pane_id), Some(&[][..]));
+        assert_eq!(state.pane_codex_main_model(&pane_id), Some("gpt-5.6-sol"));
 
         crate::codex_agents::journal::remove_journal(&pane_id);
     }

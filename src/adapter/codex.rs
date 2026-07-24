@@ -98,6 +98,7 @@ impl EventAdapter for CodexAdapter {
                     },
                     agent_id: optional_str(input, "agent_id"),
                     session_id: optional_str(input, "session_id"),
+                    model: optional_str(input, "model"),
                 })
             }
             "subagent-stop" => {
@@ -110,6 +111,7 @@ impl EventAdapter for CodexAdapter {
                     },
                     agent_id: optional_str(input, "agent_id"),
                     session_id: optional_str(input, "session_id"),
+                    model: optional_str(input, "model"),
                     last_message: json_str(input, "last_assistant_message").into(),
                     transcript_path: json_str(input, "agent_transcript_path").into(),
                 })
@@ -275,6 +277,7 @@ mod tests {
             "turn_id": "turn-1",
             "agent_id": "agent-a81f1234",
             "agent_type": "reviewer",
+            "model": "gpt-5.6-terra",
             "permission_mode": "default"
         });
 
@@ -284,6 +287,7 @@ mod tests {
                 agent_type: "reviewer".into(),
                 agent_id: Some("agent-a81f1234".into()),
                 session_id: Some("session-1".into()),
+                model: Some("gpt-5.6-terra".into()),
             })
         );
     }
@@ -298,6 +302,7 @@ mod tests {
                 agent_type: "subagent".into(),
                 agent_id: Some("agent-a81f1234".into()),
                 session_id: None,
+                model: None,
             })
         );
     }
@@ -312,6 +317,7 @@ mod tests {
                 agent_type: "subagent".into(),
                 agent_id: Some("agent-a81f1234".into()),
                 session_id: None,
+                model: None,
             })
         );
     }
@@ -326,6 +332,7 @@ mod tests {
                 agent_type: "reviewer".into(),
                 agent_id: None,
                 session_id: None,
+                model: None,
             })
         );
     }
@@ -395,6 +402,7 @@ mod tests {
             "turn_id": "turn-1",
             "agent_id": "agent-a81f1234",
             "agent_type": "reviewer",
+            "model": "gpt-5.6-terra",
             "agent_transcript_path": "/tmp/codex-subagent.jsonl",
             "last_assistant_message": "Review complete",
             "stop_hook_active": false,
@@ -407,6 +415,7 @@ mod tests {
                 agent_type: "reviewer".into(),
                 agent_id: Some("agent-a81f1234".into()),
                 session_id: Some("session-1".into()),
+                model: Some("gpt-5.6-terra".into()),
                 last_message: "Review complete".into(),
                 transcript_path: "/tmp/codex-subagent.jsonl".into(),
             })
@@ -423,6 +432,7 @@ mod tests {
                 agent_type: "subagent".into(),
                 agent_id: Some("agent-a81f1234".into()),
                 session_id: None,
+                model: None,
                 last_message: String::new(),
                 transcript_path: String::new(),
             })
@@ -439,6 +449,7 @@ mod tests {
                 agent_type: "subagent".into(),
                 agent_id: Some("agent-a81f1234".into()),
                 session_id: None,
+                model: None,
                 last_message: String::new(),
                 transcript_path: String::new(),
             })
@@ -457,6 +468,7 @@ mod tests {
                     agent_type: "reviewer".into(),
                     agent_id: None,
                     session_id: None,
+                    model: None,
                     last_message: String::new(),
                     transcript_path: String::new(),
                 })

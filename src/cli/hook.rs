@@ -44,6 +44,7 @@ fn append_codex_lifecycle(
     parent_session_id: Option<&str>,
     agent_id: Option<&str>,
     agent_type: &str,
+    model: Option<&str>,
     status: crate::codex_agents::AgentStatus,
 ) {
     if agent_name != crate::tmux::CODEX_AGENT {
@@ -55,11 +56,12 @@ fn append_codex_lifecycle(
     let Some(parent_session_id) = resolve_parent_session_id(pane, parent_session_id) else {
         return;
     };
-    let _ = crate::codex_agents::journal::append_lifecycle_event(
+    let _ = crate::codex_agents::journal::append_lifecycle_event_with_model(
         pane,
         &parent_session_id,
         agent_id,
         agent_type,
+        model,
         status,
         crate::time::now_epoch_millis(),
     );
@@ -191,6 +193,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             agent_type,
             agent_id,
             session_id,
+            model,
         } => {
             append_codex_lifecycle(
                 pane,
@@ -198,6 +201,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
                 session_id.as_deref(),
                 agent_id.as_deref(),
                 &agent_type,
+                model.as_deref(),
                 crate::codex_agents::AgentStatus::Working,
             );
             handlers::on_subagent_start(pane, &agent_type, agent_id.as_deref())
@@ -206,6 +210,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             agent_type,
             agent_id,
             session_id,
+            model,
             ..
         } => {
             append_codex_lifecycle(
@@ -214,6 +219,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
                 session_id.as_deref(),
                 agent_id.as_deref(),
                 &agent_type,
+                model.as_deref(),
                 crate::codex_agents::AgentStatus::Done,
             );
             handlers::on_subagent_stop(pane, agent_id.as_deref())
@@ -281,6 +287,16 @@ mod tests {
             .snapshots()
             .get(agent_id)
             .map(|snapshot| snapshot.status)
+    }
+
+    fn journal_model(pane: &str, parent_session_id: &str, agent_id: &str) -> Option<String> {
+        let mut tracker = JournalTracker::default();
+        tracker.set_context(pane, Some(parent_session_id));
+        tracker.refresh().expect("refresh lifecycle journal");
+        tracker
+            .snapshots()
+            .get(agent_id)
+            .and_then(|snapshot| snapshot.model.clone())
     }
 
     #[test]
@@ -357,6 +373,7 @@ mod tests {
                     agent_type: "worker".into(),
                     agent_id: Some("agent-a".into()),
                     session_id: Some("parent-1".into()),
+                    model: Some("gpt-5.6-terra".into()),
                 },
             ),
             0
@@ -364,6 +381,10 @@ mod tests {
         assert_eq!(
             journal_status(pane, "parent-1", "agent-a"),
             Some(AgentStatus::Working)
+        );
+        assert_eq!(
+            journal_model(pane, "parent-1", "agent-a").as_deref(),
+            Some("gpt-5.6-terra")
         );
 
         assert_eq!(
@@ -374,6 +395,7 @@ mod tests {
                     agent_type: "worker".into(),
                     agent_id: Some("agent-a".into()),
                     session_id: Some("parent-1".into()),
+                    model: Some("gpt-5.6-terra".into()),
                     last_message: String::new(),
                     transcript_path: String::new(),
                 },
@@ -401,6 +423,7 @@ mod tests {
                 agent_type: "worker".into(),
                 agent_id: Some("agent-a".into()),
                 session_id: Some("parent-1".into()),
+                model: None,
             },
         );
 
@@ -422,6 +445,7 @@ mod tests {
                 agent_type: "worker".into(),
                 agent_id: Some("agent-a".into()),
                 session_id: None,
+                model: None,
             },
         );
 
@@ -446,6 +470,7 @@ mod tests {
                     agent_type: "worker".into(),
                     agent_id,
                     session_id: Some("parent-1".into()),
+                    model: None,
                 },
             );
         }

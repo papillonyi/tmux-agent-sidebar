@@ -13,6 +13,8 @@ pub enum AgentStatus {
 pub struct AgentRecord {
     pub internal_id: String,
     pub display_name: String,
+    pub role: String,
+    pub model: String,
     pub status: AgentStatus,
     pub started_at: Option<u64>,
     pub finished_at: Option<u64>,
@@ -69,6 +71,10 @@ impl CodexAgentTracker {
         &self.records
     }
 
+    pub(crate) fn main_model(&self) -> Option<&str> {
+        self.transcript.main_model()
+    }
+
     fn rebuild_records(&mut self) {
         self.records.clear();
 
@@ -76,13 +82,17 @@ impl CodexAgentTracker {
             if self.transcript.closed_ids().contains(&catalog.id) {
                 continue;
             }
-            self.records.push(Self::merge_record(
+            let record = Self::merge_record(
                 &catalog.id,
                 Some(catalog),
                 self.journal.snapshots().get(&catalog.id),
                 self.transcript.child_lifecycles().get(&catalog.id),
-                self.transcript.child_names().get(&catalog.id),
-            ));
+                self.transcript.child_metadata().get(&catalog.id),
+                self.transcript.main_model(),
+            );
+            if record.status == AgentStatus::Working {
+                self.records.push(record);
+            }
         }
 
         for snapshot in self.journal.snapshots().values() {
@@ -91,13 +101,17 @@ impl CodexAgentTracker {
             {
                 continue;
             }
-            self.records.push(Self::merge_record(
+            let record = Self::merge_record(
                 &snapshot.agent_id,
                 None,
                 Some(snapshot),
                 self.transcript.child_lifecycles().get(&snapshot.agent_id),
-                self.transcript.child_names().get(&snapshot.agent_id),
-            ));
+                self.transcript.child_metadata().get(&snapshot.agent_id),
+                self.transcript.main_model(),
+            );
+            if record.status == AgentStatus::Working {
+                self.records.push(record);
+            }
         }
     }
 
@@ -106,7 +120,8 @@ impl CodexAgentTracker {
         catalog: Option<&transcript::CatalogAgent>,
         journal: Option<&journal::LifecycleSnapshot>,
         child: Option<&transcript::ChildLifecycleSnapshot>,
-        child_name: Option<&String>,
+        child_metadata: Option<&transcript::ChildMetadata>,
+        parent_model: Option<&str>,
     ) -> AgentRecord {
         let mut latest = catalog
             .and_then(|agent| agent.interrupted_at_ms)
@@ -157,13 +172,33 @@ impl CodexAgentTracker {
             .unwrap_or_default();
         let display_name = (!path.is_empty())
             .then(|| path.clone())
-            .or_else(|| child_name.filter(|name| !name.is_empty()).cloned())
+            .or_else(|| {
+                child_metadata
+                    .and_then(|metadata| metadata.display_name.as_ref())
+                    .filter(|name| !name.is_empty())
+                    .cloned()
+            })
             .or_else(|| (!fallback_agent_type.is_empty()).then(|| fallback_agent_type.clone()))
             .unwrap_or_else(|| "subagent".to_owned());
+        let role = child_metadata
+            .and_then(|metadata| metadata.role.as_ref())
+            .filter(|role| !role.is_empty())
+            .cloned()
+            .or_else(|| (!fallback_agent_type.is_empty()).then(|| fallback_agent_type.clone()))
+            .unwrap_or_else(|| "default".to_owned());
+        let model = child_metadata
+            .and_then(|metadata| metadata.model.as_ref())
+            .filter(|model| !model.is_empty())
+            .cloned()
+            .or_else(|| journal.and_then(|snapshot| snapshot.model.clone()))
+            .or_else(|| parent_model.map(str::to_owned))
+            .unwrap_or_else(|| "unknown".to_owned());
 
         AgentRecord {
             internal_id: id.to_owned(),
             display_name,
+            role,
+            model,
             status,
             started_at: started_at_ms.map(|timestamp| timestamp / 1_000),
             finished_at: finished_at_ms.map(|timestamp| timestamp / 1_000),
@@ -180,7 +215,10 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{AgentRecord, AgentStatus, CodexAgentTracker};
-    use crate::codex_agents::journal::{append_lifecycle_event, journal_file_path, remove_journal};
+    use crate::codex_agents::journal::{
+        append_lifecycle_event, append_lifecycle_event_with_model, journal_file_path,
+        remove_journal,
+    };
 
     fn unique_pane(test_name: &str) -> String {
         format!("%MERGE_{test_name}_{}", std::process::id())
@@ -288,6 +326,15 @@ mod tests {
         })
     }
 
+    fn turn_context(model: &str) -> Value {
+        json!({
+            "type": "turn_context",
+            "payload": {
+                "model": model
+            }
+        })
+    }
+
     fn child_task_complete(started_at: u64, completed_at: u64) -> Value {
         json!({
             "type": "event_msg",
@@ -355,21 +402,15 @@ mod tests {
                 .iter()
                 .map(|agent| agent.internal_id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["agent-a", "agent-b", "agent-c"],
+            vec!["agent-b", "agent-c"],
         );
-        let agent_a = &tracker.records()[0];
-        assert_eq!(agent_a.display_name, "/root/task1_review");
-        assert_eq!(agent_a.status, AgentStatus::Done);
-        assert_eq!(agent_a.started_at, Some(10));
-        assert_eq!(agent_a.finished_at, Some(25));
-
-        let agent_b = &tracker.records()[1];
+        let agent_b = &tracker.records()[0];
         assert_eq!(agent_b.display_name, "/root/task2_owner");
         assert_eq!(agent_b.status, AgentStatus::Working);
         assert_eq!(agent_b.started_at, Some(20));
         assert_eq!(agent_b.finished_at, None);
 
-        let agent_c = &tracker.records()[2];
+        let agent_c = &tracker.records()[1];
         assert_eq!(agent_c.display_name, "journal-c");
         assert_eq!(agent_c.status, AgentStatus::Working);
         assert_eq!(agent_c.started_at, Some(12));
@@ -399,11 +440,9 @@ mod tests {
 
         let mut tracker = CodexAgentTracker::default();
         tracker.refresh(&pane, Some("parent-1"), transcript.to_str());
-        assert_eq!(
-            tracker.records()[0].status,
-            AgentStatus::Unknown,
-            "catalog metadata alone must not claim a lifecycle state",
-        );
+        assert_eq!(tracker.records().len(), 1);
+        assert_eq!(tracker.records()[0].internal_id, "journal-only");
+        assert_eq!(tracker.records()[0].status, AgentStatus::Working);
 
         fs::write(&transcript, "")?;
         tracker.refresh(&pane, Some("parent-1"), transcript.to_str());
@@ -441,12 +480,11 @@ mod tests {
         let mut tracker = CodexAgentTracker::default();
         tracker.refresh(&pane, Some("parent-1"), transcript.to_str());
 
-        assert_eq!(tracker.records()[0].status, AgentStatus::Interrupted);
-        assert_eq!(tracker.records()[0].started_at, Some(10));
-        assert_eq!(tracker.records()[0].finished_at, Some(25));
-        assert_eq!(tracker.records()[1].status, AgentStatus::Working);
-        assert_eq!(tracker.records()[1].started_at, Some(40));
-        assert_eq!(tracker.records()[1].finished_at, None);
+        assert_eq!(tracker.records().len(), 1);
+        assert_eq!(tracker.records()[0].internal_id, "agent-b");
+        assert_eq!(tracker.records()[0].status, AgentStatus::Working);
+        assert_eq!(tracker.records()[0].started_at, Some(40));
+        assert_eq!(tracker.records()[0].finished_at, None);
 
         remove_journal(&pane);
         Ok(())
@@ -498,6 +536,14 @@ mod tests {
         write_lines(
             &transcript,
             &[activity("started", "agent-a", "/root/task-a", 1_000)],
+        )?;
+        append_lifecycle_event(
+            &pane,
+            "parent-1",
+            "agent-a",
+            "worker",
+            AgentStatus::Working,
+            10_000,
         )?;
 
         let mut tracker = CodexAgentTracker::default();
@@ -553,6 +599,14 @@ mod tests {
                 "/root/old-task",
                 1_000,
             )],
+        )?;
+        append_lifecycle_event(
+            &old_pane,
+            "parent-old",
+            "agent-from-old-context",
+            "worker",
+            AgentStatus::Working,
+            10_000,
         )?;
 
         let mut tracker = CodexAgentTracker::default();
@@ -628,6 +682,8 @@ mod tests {
         let expected = [AgentRecord {
             internal_id: "agent-from-valid-cache".into(),
             display_name: "/root/stable-task".into(),
+            role: "worker".into(),
+            model: "unknown".into(),
             status: AgentStatus::Working,
             started_at: Some(10),
             finished_at: None,
@@ -650,6 +706,119 @@ mod tests {
 
         fs::remove_dir(&transcript)?;
         fs::remove_dir(&journal)?;
+        Ok(())
+    }
+
+    #[test]
+    fn publishes_only_working_records_with_normalized_role_and_model() -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let parent_id = "019f9311-0000-7000-8000-000000000001";
+        let child_id = "019f9311-0000-7000-8000-000000000002";
+        let hook_only_id = "019f9311-0000-7000-8000-000000000003";
+        let parent_fallback_id = "019f9311-0000-7000-8000-000000000004";
+        let parent = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T17-00-00",
+            parent_id,
+        )?;
+        write_lines(
+            &parent,
+            &[
+                turn_context("gpt-5.6-sol"),
+                activity(
+                    "started",
+                    child_id,
+                    "/root/task6_implement/lifecycle_probe_alpha",
+                    10_000,
+                ),
+            ],
+        )?;
+
+        let child = rollout_path(
+            dir.path(),
+            ("2026", "07", "24"),
+            "2026-07-24T17-00-01",
+            child_id,
+        )?;
+        let mut child_meta = child_session_meta(child_id, parent_id);
+        child_meta["payload"]["source"]["subagent"]["thread_spawn"]["agent_role"] = json!("worker");
+        write_lines(
+            &child,
+            &[
+                child_meta,
+                turn_context("gpt-5.6-terra"),
+                child_task_started(10),
+            ],
+        )?;
+
+        let pane = unique_pane("active_metadata");
+        remove_journal(&pane);
+        append_lifecycle_event_with_model(
+            &pane,
+            parent_id,
+            child_id,
+            "reviewer",
+            Some("hook-model"),
+            AgentStatus::Working,
+            10_000,
+        )?;
+        append_lifecycle_event_with_model(
+            &pane,
+            parent_id,
+            hook_only_id,
+            "explorer",
+            Some("gpt-5.6-hook"),
+            AgentStatus::Working,
+            11_000,
+        )?;
+        append_lifecycle_event(
+            &pane,
+            parent_id,
+            parent_fallback_id,
+            "",
+            AgentStatus::Working,
+            12_000,
+        )?;
+
+        let mut tracker = CodexAgentTracker::default();
+        tracker.refresh(&pane, Some(parent_id), parent.to_str());
+
+        assert_eq!(tracker.main_model(), Some("gpt-5.6-sol"));
+        assert_eq!(
+            tracker.records(),
+            &[
+                AgentRecord {
+                    internal_id: child_id.into(),
+                    display_name: "/root/task6_implement/lifecycle_probe_alpha".into(),
+                    role: "worker".into(),
+                    model: "gpt-5.6-terra".into(),
+                    status: AgentStatus::Working,
+                    started_at: Some(10),
+                    finished_at: None,
+                },
+                AgentRecord {
+                    internal_id: hook_only_id.into(),
+                    display_name: "explorer".into(),
+                    role: "explorer".into(),
+                    model: "gpt-5.6-hook".into(),
+                    status: AgentStatus::Working,
+                    started_at: Some(11),
+                    finished_at: None,
+                },
+                AgentRecord {
+                    internal_id: parent_fallback_id.into(),
+                    display_name: "subagent".into(),
+                    role: "default".into(),
+                    model: "gpt-5.6-sol".into(),
+                    status: AgentStatus::Working,
+                    started_at: Some(12),
+                    finished_at: None,
+                },
+            ]
+        );
+
+        remove_journal(&pane);
         Ok(())
     }
 
@@ -705,12 +874,10 @@ mod tests {
         let mut tracker = CodexAgentTracker::default();
         tracker.refresh(&pane, Some(parent_id), parent.to_str());
 
-        assert_eq!(tracker.records()[0].status, AgentStatus::Done);
-        assert_eq!(tracker.records()[0].started_at, Some(10));
-        assert_eq!(tracker.records()[0].finished_at, Some(30));
-        assert_eq!(tracker.records()[1].status, AgentStatus::Interrupted);
-        assert_eq!(tracker.records()[1].started_at, Some(11));
-        assert_eq!(tracker.records()[1].finished_at, Some(40));
+        assert!(
+            tracker.records().is_empty(),
+            "terminal child lifecycle must remove stale hook working rows"
+        );
 
         remove_journal(&pane);
         Ok(())
@@ -762,25 +929,7 @@ mod tests {
         let mut tracker = CodexAgentTracker::default();
         tracker.refresh(&pane, Some(parent_id), parent.to_str());
 
-        assert_eq!(
-            tracker.records(),
-            &[
-                AgentRecord {
-                    internal_id: complete_id.into(),
-                    display_name: "worker".into(),
-                    status: AgentStatus::Done,
-                    started_at: Some(10),
-                    finished_at: Some(30),
-                },
-                AgentRecord {
-                    internal_id: interrupted_id.into(),
-                    display_name: "worker".into(),
-                    status: AgentStatus::Interrupted,
-                    started_at: Some(11),
-                    finished_at: Some(40),
-                },
-            ],
-        );
+        assert!(tracker.records().is_empty());
         remove_journal(&pane);
         Ok(())
     }
@@ -904,7 +1053,7 @@ mod tests {
         )?;
         let mut tracker = CodexAgentTracker::default();
         tracker.refresh(&pane, Some(parent_id), parent.to_str());
-        assert_eq!(tracker.records()[0].status, AgentStatus::Done);
+        assert!(tracker.records().is_empty());
 
         let mut file = fs::OpenOptions::new().append(true).open(&parent)?;
         writeln!(file, "{}", close_call(child_id, "close-journal-child"))?;
@@ -978,16 +1127,7 @@ mod tests {
         let mut tracker = CodexAgentTracker::default();
         tracker.refresh(&pane, Some(parent_id), parent.to_str());
 
-        assert_eq!(
-            tracker.records(),
-            &[AgentRecord {
-                internal_id: child_id.into(),
-                display_name: "/root/inherited-parent-meta".into(),
-                status: AgentStatus::Interrupted,
-                started_at: Some(10),
-                finished_at: Some(30),
-            }],
-        );
+        assert!(tracker.records().is_empty());
         remove_journal(&pane);
         Ok(())
     }
@@ -1110,7 +1250,7 @@ mod tests {
         remove_journal(&pane);
         let mut tracker = CodexAgentTracker::default();
         tracker.refresh(&pane, Some(parent_id), parent.to_str());
-        assert_eq!(tracker.records()[0].status, AgentStatus::Unknown);
+        assert!(tracker.records().is_empty());
 
         let child = rollout_path(
             dir.path(),
@@ -1167,8 +1307,7 @@ mod tests {
         file.write_all(&interrupted.as_bytes()[split..])?;
         file.write_all(b"\n")?;
         tracker.refresh(&pane, Some(parent_id), parent.to_str());
-        assert_eq!(tracker.records()[0].status, AgentStatus::Interrupted);
-        assert_eq!(tracker.records()[0].finished_at, Some(30));
+        assert!(tracker.records().is_empty());
         remove_journal(&pane);
         Ok(())
     }
@@ -1204,7 +1343,7 @@ mod tests {
         remove_journal(&pane);
         let mut tracker = CodexAgentTracker::default();
         tracker.refresh(&pane, Some(parent_id), parent.to_str());
-        assert_eq!(tracker.records()[0].status, AgentStatus::Done);
+        assert!(tracker.records().is_empty());
 
         write_child_rollout(
             &child,
@@ -1258,7 +1397,7 @@ mod tests {
         remove_journal(&pane);
         let mut tracker = CodexAgentTracker::default();
         tracker.refresh(&pane, Some(parent_id), parent.to_str());
-        assert_eq!(tracker.records()[0].status, AgentStatus::Interrupted);
+        assert!(tracker.records().is_empty());
 
         append_lifecycle_event(
             &pane,
@@ -1309,7 +1448,7 @@ mod tests {
         remove_journal(&pane);
         let mut tracker = CodexAgentTracker::default();
         tracker.refresh(&pane, Some(parent_a_id), parent_a.to_str());
-        assert_eq!(tracker.records()[0].status, AgentStatus::Interrupted);
+        assert!(tracker.records().is_empty());
 
         let parent_b_id = "019f9306-0000-7000-8000-000000000003";
         let child_b_id = "019f9306-0000-7000-8000-000000000004";
@@ -1323,11 +1462,19 @@ mod tests {
             &parent_b,
             &[activity("started", child_b_id, "/root/new-child", 30_000)],
         )?;
+        append_lifecycle_event(
+            &pane,
+            parent_b_id,
+            child_b_id,
+            "worker",
+            AgentStatus::Working,
+            30_000,
+        )?;
         tracker.refresh(&pane, Some(parent_b_id), parent_b.to_str());
 
         assert_eq!(tracker.records().len(), 1);
         assert_eq!(tracker.records()[0].internal_id, child_b_id);
-        assert_eq!(tracker.records()[0].status, AgentStatus::Unknown);
+        assert_eq!(tracker.records()[0].status, AgentStatus::Working);
         remove_journal(&pane);
         Ok(())
     }
@@ -1363,7 +1510,7 @@ mod tests {
         remove_journal(&pane);
         let mut tracker = CodexAgentTracker::default();
         tracker.refresh(&pane, Some(parent_id), parent.to_str());
-        assert_eq!(tracker.records()[0].status, AgentStatus::Interrupted);
+        assert!(tracker.records().is_empty());
 
         let mut file = fs::OpenOptions::new().append(true).open(&parent)?;
         writeln!(file, "{}", close_call(child_id, "close-child"))?;
@@ -1376,10 +1523,18 @@ mod tests {
             &parent,
             &[activity("started", child_id, "/root/closed-child", 30_000)],
         )?;
+        append_lifecycle_event(
+            &pane,
+            parent_id,
+            child_id,
+            "worker",
+            AgentStatus::Working,
+            30_000,
+        )?;
         tracker.refresh(&pane, Some(parent_id), parent.to_str());
 
         assert_eq!(tracker.records().len(), 1);
-        assert_eq!(tracker.records()[0].status, AgentStatus::Unknown);
+        assert_eq!(tracker.records()[0].status, AgentStatus::Working);
         remove_journal(&pane);
         Ok(())
     }

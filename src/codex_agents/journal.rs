@@ -38,11 +38,32 @@ impl Drop for FileLock {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn append_lifecycle_event(
     pane_id: &str,
     parent_session_id: &str,
     agent_id: &str,
     agent_type: &str,
+    status: AgentStatus,
+    occurred_at_ms: u64,
+) -> io::Result<()> {
+    append_lifecycle_event_with_model(
+        pane_id,
+        parent_session_id,
+        agent_id,
+        agent_type,
+        None,
+        status,
+        occurred_at_ms,
+    )
+}
+
+pub(crate) fn append_lifecycle_event_with_model(
+    pane_id: &str,
+    parent_session_id: &str,
+    agent_id: &str,
+    agent_type: &str,
+    model: Option<&str>,
     status: AgentStatus,
     occurred_at_ms: u64,
 ) -> io::Result<()> {
@@ -61,6 +82,7 @@ pub(crate) fn append_lifecycle_event(
         "parent_session_id": parent_session_id,
         "agent_id": crate::cli::sanitize_tmux_value(agent_id),
         "agent_type": crate::cli::sanitize_tmux_value(agent_type),
+        "model": model.map(crate::cli::sanitize_tmux_value),
         "state": state,
         "occurred_at_ms": occurred_at_ms,
     });
@@ -85,6 +107,7 @@ pub(crate) fn remove_journal(pane_id: &str) {
 pub(crate) struct LifecycleSnapshot {
     pub agent_id: String,
     pub agent_type: String,
+    pub model: Option<String>,
     pub status: AgentStatus,
     pub started_at_ms: Option<u64>,
     pub finished_at_ms: Option<u64>,
@@ -188,6 +211,11 @@ impl JournalTracker {
         let Some(agent_type) = record.get("agent_type").and_then(Value::as_str) else {
             return;
         };
+        let model = record
+            .get("model")
+            .and_then(Value::as_str)
+            .map(crate::cli::sanitize_tmux_value)
+            .filter(|value| !value.is_empty());
         let Some(occurred_at_ms) = record.get("occurred_at_ms").and_then(Value::as_u64) else {
             return;
         };
@@ -205,6 +233,9 @@ impl JournalTracker {
                 return;
             }
             current.agent_type = agent_type.to_owned();
+            if model.is_some() {
+                current.model = model;
+            }
             current.last_event_at_ms = occurred_at_ms;
             match incoming_status {
                 AgentStatus::Working if current.status != AgentStatus::Working => {
@@ -232,6 +263,7 @@ impl JournalTracker {
             LifecycleSnapshot {
                 agent_id: agent_id.to_owned(),
                 agent_type: agent_type.to_owned(),
+                model,
                 status: incoming_status,
                 started_at_ms,
                 finished_at_ms,
@@ -248,7 +280,10 @@ mod tests {
     use std::sync::Arc;
     use std::thread;
 
-    use super::{JournalTracker, append_lifecycle_event, journal_file_path, remove_journal};
+    use super::{
+        JournalTracker, append_lifecycle_event, append_lifecycle_event_with_model,
+        journal_file_path, remove_journal,
+    };
     use crate::codex_agents::AgentStatus;
 
     fn unique_pane(test_name: &str) -> String {
@@ -259,6 +294,41 @@ mod tests {
         let mut tracker = JournalTracker::default();
         assert!(tracker.set_context(pane, Some(parent_session_id)));
         tracker
+    }
+
+    #[test]
+    fn model_metadata_is_optional_and_preserved() -> io::Result<()> {
+        let pane = unique_pane("optional_model");
+        remove_journal(&pane);
+
+        append_lifecycle_event(
+            &pane,
+            "parent-1",
+            "legacy-agent",
+            "worker",
+            AgentStatus::Working,
+            9_000,
+        )?;
+        append_lifecycle_event_with_model(
+            &pane,
+            "parent-1",
+            "model-agent",
+            "worker",
+            Some("gpt-5.6-terra"),
+            AgentStatus::Working,
+            10_000,
+        )?;
+
+        let mut tracker = tracker_for(&pane, "parent-1");
+        tracker.refresh()?;
+        assert_eq!(tracker.snapshots()["legacy-agent"].model, None);
+        assert_eq!(
+            tracker.snapshots()["model-agent"].model.as_deref(),
+            Some("gpt-5.6-terra")
+        );
+
+        remove_journal(&pane);
+        Ok(())
     }
 
     #[test]

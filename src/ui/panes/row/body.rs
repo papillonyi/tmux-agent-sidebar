@@ -151,9 +151,15 @@ pub(super) fn subagent_rows(
 
 pub(super) fn codex_agent_rows(
     agents: &[AgentRecord],
+    main_model: Option<&str>,
+    main_started_at: Option<u64>,
     ctx: &RowCtx<'_>,
     now: u64,
 ) -> Vec<Line<'static>> {
+    let agents = agents
+        .iter()
+        .filter(|agent| agent.status == AgentStatus::Working)
+        .collect::<Vec<_>>();
     if agents.is_empty() {
         return Vec::new();
     }
@@ -161,16 +167,14 @@ pub(super) fn codex_agent_rows(
     let theme = ctx.theme;
     let tree_style = ctx.apply_bg(Style::default().fg(theme.text_muted));
     let label_style = ctx.apply_bg(Style::default().fg(theme.subagent));
-    let duration_style = ctx.apply_bg(Style::default().fg(theme.text_active));
-    let mut out = Vec::with_capacity(agents.len() + 1);
+    let mut out = Vec::with_capacity((agents.len() + 1) * 2);
 
     let main_prefix = "  ├ ";
-    let main_left_budget = ctx.inner_width;
-    let main_prefix = truncate_to_width(main_prefix, main_left_budget);
+    let main_prefix = truncate_to_width(main_prefix, ctx.inner_width);
     let main_prefix_width = display_width(&main_prefix);
     let main_label = truncate_to_width(
-        "Main [default] (current)",
-        main_left_budget.saturating_sub(main_prefix_width),
+        "Main (current)",
+        ctx.inner_width.saturating_sub(main_prefix_width),
     );
     let main_left_width = main_prefix_width + display_width(&main_label);
     out.push(ctx.row_line(
@@ -180,6 +184,14 @@ pub(super) fn codex_agent_rows(
         ],
         main_left_width,
     ));
+    out.push(codex_agent_metadata_row(
+        "  │  ",
+        main_started_at,
+        "default",
+        main_model.unwrap_or("unknown"),
+        ctx,
+        now,
+    ));
 
     let last_idx = agents.len() - 1;
     for (index, agent) in agents.iter().enumerate() {
@@ -188,56 +200,89 @@ pub(super) fn codex_agent_rows(
         } else {
             "  ├ "
         };
-        let label = agent.display_name.clone();
-        let (status, status_color) = match agent.status {
-            AgentStatus::Working => ("● working", theme.status_running),
-            AgentStatus::Done => ("✓ done", theme.status_idle),
-            AgentStatus::Interrupted => ("○ interrupted", theme.status_waiting),
-            AgentStatus::Unknown => ("? unknown", theme.status_unknown),
-        };
-        let duration = match agent.status {
-            AgentStatus::Done => elapsed_label(agent.started_at, agent.finished_at.unwrap_or(0)),
-            AgentStatus::Working => elapsed_label(agent.started_at, now),
-            AgentStatus::Interrupted | AgentStatus::Unknown => String::new(),
-        };
-
-        let connector_width = display_width(connector);
-        let minimum_left_width = connector_width + 1;
-        let mandatory_right_width = display_width(status);
-        let duration_width = display_width(&duration);
-        let duration_suffix_width = 1 + duration_width;
-        let include_duration = !duration.is_empty()
-            && ctx.inner_width
-                >= minimum_left_width + mandatory_right_width + duration_suffix_width;
-        let right_width =
-            mandatory_right_width + usize::from(include_duration) * duration_suffix_width;
-        let right_gap = usize::from(ctx.inner_width > minimum_left_width + right_width);
-        let left_budget = ctx.inner_width.saturating_sub(right_width + right_gap);
-        let connector = truncate_to_width(connector, left_budget);
+        let connector = truncate_to_width(connector, ctx.inner_width);
         let connector_width = display_width(&connector);
-        let label = truncate_to_width(&label, left_budget.saturating_sub(connector_width));
+        let label = truncate_to_width(
+            &agent.display_name,
+            ctx.inner_width.saturating_sub(connector_width),
+        );
         let left_width = connector_width + display_width(&label);
-
-        let mut right_spans = vec![Span::styled(
-            status,
-            ctx.apply_bg(Style::default().fg(status_color)),
-        )];
-        if include_duration {
-            right_spans.push(Span::styled(format!(" {duration}"), duration_style));
-        }
-
-        out.push(ctx.row_line_split(
+        out.push(ctx.row_line(
             vec![
                 Span::styled(connector, tree_style),
                 Span::styled(label, label_style),
             ],
             left_width,
-            right_spans,
-            right_width,
+        ));
+        out.push(codex_agent_metadata_row(
+            if index == last_idx {
+                "     "
+            } else {
+                "  │  "
+            },
+            agent.started_at,
+            &agent.role,
+            &agent.model,
+            ctx,
+            now,
         ));
     }
 
     out
+}
+
+fn codex_agent_metadata_row(
+    prefix: &str,
+    started_at: Option<u64>,
+    role: &str,
+    model: &str,
+    ctx: &RowCtx<'_>,
+    now: u64,
+) -> Line<'static> {
+    let prefix = truncate_to_width(prefix, ctx.inner_width);
+    let mut used_width = display_width(&prefix);
+    let mut spans = vec![Span::styled(
+        prefix,
+        ctx.apply_bg(Style::default().fg(ctx.theme.text_muted)),
+    )];
+
+    let status = truncate_to_width("● working", ctx.inner_width.saturating_sub(used_width));
+    used_width += display_width(&status);
+    spans.push(Span::styled(
+        status,
+        ctx.apply_bg(Style::default().fg(ctx.theme.status_running)),
+    ));
+
+    let elapsed = elapsed_label(started_at, now);
+    for (content, color) in [
+        (
+            (!elapsed.is_empty()).then(|| format!(" {elapsed}")),
+            ctx.theme.text_active,
+        ),
+        (
+            (!role.is_empty()).then(|| format!(" · {role}")),
+            ctx.theme.subagent,
+        ),
+        (
+            (!model.is_empty()).then(|| format!(" · {model}")),
+            ctx.theme.text_muted,
+        ),
+    ] {
+        let Some(content) = content else {
+            continue;
+        };
+        let width = display_width(&content);
+        if used_width + width > ctx.inner_width {
+            break;
+        }
+        used_width += width;
+        spans.push(Span::styled(
+            content,
+            ctx.apply_bg(Style::default().fg(color)),
+        ));
+    }
+
+    ctx.row_line(spans, used_width)
 }
 
 pub(super) fn wait_reason_row(

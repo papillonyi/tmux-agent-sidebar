@@ -36,6 +36,13 @@ pub(crate) struct ChildLifecycleSnapshot {
     pub last_event_at_ms: u64,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ChildMetadata {
+    pub display_name: Option<String>,
+    pub role: Option<String>,
+    pub model: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 struct ChildRolloutTracker {
     path: PathBuf,
@@ -48,7 +55,7 @@ struct ChildRolloutTracker {
     partial_line: Vec<u8>,
     content_anchor: Vec<u8>,
     validated: bool,
-    display_name: Option<String>,
+    metadata: ChildMetadata,
     lifecycle: Option<ChildLifecycleSnapshot>,
 }
 
@@ -94,7 +101,7 @@ impl ChildRolloutTracker {
             partial_line: Vec::new(),
             content_anchor: Vec::new(),
             validated: false,
-            display_name: None,
+            metadata: ChildMetadata::default(),
             lifecycle: None,
         }
     }
@@ -163,7 +170,7 @@ impl ChildRolloutTracker {
         self.partial_line.clear();
         self.content_anchor.clear();
         self.validated = false;
-        self.display_name = None;
+        self.metadata = ChildMetadata::default();
         self.lifecycle = None;
     }
 
@@ -199,8 +206,16 @@ impl ChildRolloutTracker {
                     let payload = record.get("payload");
                     self.validated = self.valid_session_meta(payload);
                     if self.validated {
-                        self.display_name = child_display_name(payload);
+                        self.metadata.display_name = child_display_name(payload);
+                        self.metadata.role = child_role(payload);
                     }
+                }
+            }
+            Some("turn_context") if self.validated => {
+                if let Some(model) =
+                    sanitized_nonempty(record.get("payload").and_then(|value| value.get("model")))
+                {
+                    self.metadata.model = Some(model);
                 }
             }
             Some("event_msg") if self.validated => {
@@ -220,9 +235,10 @@ impl ChildRolloutTracker {
         {
             return false;
         }
-        if !missing_or_exact_string(payload.get("parent_thread_id"), &self.parent_session_id) {
+        let Some(parent_thread_id) = optional_nonempty_string(payload.get("parent_thread_id"))
+        else {
             return false;
-        }
+        };
         if !missing_or_exact_string(payload.get("thread_source"), "subagent") {
             return false;
         }
@@ -236,10 +252,17 @@ impl ChildRolloutTracker {
                 };
                 match subagent.get("thread_spawn") {
                     None => true,
-                    Some(Value::Object(thread_spawn)) => missing_or_exact_string(
-                        thread_spawn.get("parent_thread_id"),
-                        &self.parent_session_id,
-                    ),
+                    Some(Value::Object(thread_spawn)) => {
+                        let Some(spawn_parent_thread_id) =
+                            optional_nonempty_string(thread_spawn.get("parent_thread_id"))
+                        else {
+                            return false;
+                        };
+                        match (parent_thread_id, spawn_parent_thread_id) {
+                            (Some(parent), Some(spawn_parent)) => parent == spawn_parent,
+                            _ => true,
+                        }
+                    }
                     Some(_) => false,
                 }
             }
@@ -312,6 +335,14 @@ fn missing_or_exact_string(value: Option<&Value>, expected: &str) -> bool {
     }
 }
 
+fn optional_nonempty_string(value: Option<&Value>) -> Option<Option<&str>> {
+    match value {
+        None => Some(None),
+        Some(Value::String(value)) if !value.is_empty() => Some(Some(value)),
+        Some(_) => None,
+    }
+}
+
 fn sanitized_nonempty(value: Option<&Value>) -> Option<String> {
     let value = value?.as_str().map(crate::cli::sanitize_tmux_value)?;
     (!value.is_empty()).then_some(value)
@@ -333,6 +364,17 @@ fn child_display_name(payload: Option<&Value>) -> Option<String> {
         .or_else(|| sanitized_nonempty(payload.get("agent_nickname")))
 }
 
+fn child_role(payload: Option<&Value>) -> Option<String> {
+    payload?
+        .get("source")
+        .and_then(Value::as_object)
+        .and_then(|source| source.get("subagent"))
+        .and_then(Value::as_object)
+        .and_then(|subagent| subagent.get("thread_spawn"))
+        .and_then(Value::as_object)
+        .and_then(|spawn| sanitized_nonempty(spawn.get("agent_role")))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
 pub(crate) struct CatalogAgent {
@@ -352,12 +394,13 @@ pub(crate) struct TranscriptTracker {
     initialized: bool,
     partial_line: Vec<u8>,
     content_anchor: Vec<u8>,
+    main_model: Option<String>,
     agents: IndexMap<String, CatalogAgent>,
     pending_close_targets: HashMap<String, String>,
     closed_ids: HashSet<String>,
     child_trackers: HashMap<String, ChildRolloutTracker>,
     child_lifecycles: HashMap<String, ChildLifecycleSnapshot>,
-    child_names: HashMap<String, String>,
+    child_metadata: HashMap<String, ChildMetadata>,
     discovery_retries: HashMap<String, DiscoveryRetry>,
     discovery_tick: u64,
 }
@@ -480,15 +523,19 @@ impl TranscriptTracker {
         &self.child_lifecycles
     }
 
-    pub(crate) fn child_names(&self) -> &HashMap<String, String> {
-        &self.child_names
+    pub(crate) fn child_metadata(&self) -> &HashMap<String, ChildMetadata> {
+        &self.child_metadata
+    }
+
+    pub(crate) fn main_model(&self) -> Option<&str> {
+        self.main_model.as_deref()
     }
 
     fn reset_context(&mut self) {
         self.reset_parent();
         self.child_trackers.clear();
         self.child_lifecycles.clear();
-        self.child_names.clear();
+        self.child_metadata.clear();
         self.discovery_retries.clear();
         self.discovery_tick = 0;
     }
@@ -500,6 +547,7 @@ impl TranscriptTracker {
         self.initialized = false;
         self.partial_line.clear();
         self.content_anchor.clear();
+        self.main_model = None;
         self.agents.clear();
         self.pending_close_targets.clear();
         self.closed_ids.clear();
@@ -512,7 +560,7 @@ impl TranscriptTracker {
         ) else {
             self.child_trackers.clear();
             self.child_lifecycles.clear();
-            self.child_names.clear();
+            self.child_metadata.clear();
             self.discovery_retries.clear();
             return;
         };
@@ -524,7 +572,7 @@ impl TranscriptTracker {
         live_ids.retain(|id| !self.closed_ids.contains(id));
         self.child_trackers.retain(|id, _| live_ids.contains(id));
         self.child_lifecycles.retain(|id, _| live_ids.contains(id));
-        self.child_names.retain(|id, _| live_ids.contains(id));
+        self.child_metadata.retain(|id, _| live_ids.contains(id));
         self.discovery_retries.retain(|id, _| live_ids.contains(id));
 
         let tracked_ids = self.child_trackers.keys().cloned().collect::<Vec<_>>();
@@ -538,9 +586,8 @@ impl TranscriptTracker {
                     if let Some(lifecycle) = candidate.lifecycle.clone() {
                         self.child_lifecycles.insert(id.clone(), lifecycle);
                     }
-                    if let Some(name) = candidate.display_name.clone() {
-                        self.child_names.insert(id.clone(), name);
-                    }
+                    self.child_metadata
+                        .insert(id.clone(), candidate.metadata.clone());
                     self.child_trackers.insert(id.clone(), candidate);
                     self.discovery_retries.remove(&id);
                 }
@@ -587,9 +634,8 @@ impl TranscriptTracker {
                         if let Some(lifecycle) = candidate.lifecycle.clone() {
                             self.child_lifecycles.insert(id.clone(), lifecycle);
                         }
-                        if let Some(name) = candidate.display_name.clone() {
-                            self.child_names.insert(id.clone(), name);
-                        }
+                        self.child_metadata
+                            .insert(id.clone(), candidate.metadata.clone());
                         self.child_trackers.insert(id.clone(), candidate);
                         self.discovery_retries.remove(&id);
                         resolved = true;
@@ -630,6 +676,13 @@ impl TranscriptTracker {
             return;
         };
         match record.get("type").and_then(Value::as_str) {
+            Some("turn_context") => {
+                if let Some(model) =
+                    sanitized_nonempty(record.get("payload").and_then(|value| value.get("model")))
+                {
+                    self.main_model = Some(model);
+                }
+            }
             Some("event_msg") => self.fold_event(record.get("payload")),
             Some("response_item") => self.fold_response(record.get("payload")),
             _ => {}
@@ -965,8 +1018,79 @@ mod tests {
                 .unwrap()
                 .as_bytes(),
             );
-            assert_eq!(tracker.display_name.as_deref(), Some(expected));
+            assert_eq!(tracker.metadata.display_name.as_deref(), Some(expected));
         }
+    }
+
+    #[test]
+    fn child_meta_accepts_nested_parent_and_extracts_role_and_model() {
+        let child_id = "019f9307-0000-7000-8000-000000000003";
+        let root_session_id = "019f9307-0000-7000-8000-000000000001";
+        let immediate_parent_id = "019f9307-0000-7000-8000-000000000002";
+        let mut tracker = child_tracker(child_id, root_session_id);
+
+        for record in [
+            json!({
+                "type": "session_meta",
+                "payload": {
+                    "id": child_id,
+                    "session_id": root_session_id,
+                    "parent_thread_id": immediate_parent_id,
+                    "thread_source": "subagent",
+                    "agent_path": "/root/task6_implement/lifecycle_probe_alpha",
+                    "source": {
+                        "subagent": {
+                            "thread_spawn": {
+                                "parent_thread_id": immediate_parent_id,
+                                "depth": 2,
+                                "agent_role": "worker"
+                            }
+                        }
+                    }
+                }
+            }),
+            json!({
+                "type": "turn_context",
+                "payload": {
+                    "model": "gpt-5.6-terra"
+                }
+            }),
+        ] {
+            tracker.fold_line(serde_json::to_string(&record).unwrap().as_bytes());
+        }
+
+        assert!(tracker.validated);
+        assert_eq!(
+            tracker.metadata.display_name.as_deref(),
+            Some("/root/task6_implement/lifecycle_probe_alpha")
+        );
+        assert_eq!(tracker.metadata.role.as_deref(), Some("worker"));
+        assert_eq!(tracker.metadata.model.as_deref(), Some("gpt-5.6-terra"));
+    }
+
+    #[test]
+    fn parent_rollout_retains_latest_model() -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("rollout.jsonl");
+        write_lines(
+            &path,
+            &[
+                json!({
+                    "type": "turn_context",
+                    "payload": { "model": "gpt-5.6-sol" }
+                }),
+                json!({
+                    "type": "turn_context",
+                    "payload": { "model": "gpt-5.6-terra" }
+                }),
+            ],
+        )?;
+
+        let mut tracker = tracker_for(&path, "root-session");
+        tracker.refresh()?;
+
+        assert_eq!(tracker.main_model(), Some("gpt-5.6-terra"));
+        Ok(())
     }
 
     #[test]
@@ -977,7 +1101,6 @@ mod tests {
         let malformed_values = [
             ("parent_thread_id", Value::Null),
             ("parent_thread_id", json!({})),
-            ("parent_thread_id", json!("wrong-parent")),
             ("thread_source", Value::Null),
             ("thread_source", json!({})),
             ("thread_source", json!("user")),
@@ -1033,7 +1156,7 @@ mod tests {
             json!({
                 "subagent": {
                     "thread_spawn": {
-                        "parent_thread_id": "wrong-parent"
+                        "parent_thread_id": "different-immediate-parent"
                     }
                 }
             }),

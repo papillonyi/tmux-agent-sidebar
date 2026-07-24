@@ -20,6 +20,7 @@ pub struct PaneRuntimeState {
     /// File cursor and partial-line buffer used by the one-second refresh loop.
     pub(crate) codex_usage_tracker: CodexUsageTracker,
     pub codex_agents: Vec<AgentRecord>,
+    pub codex_main_model: Option<String>,
     pub(crate) codex_agent_tracker: CodexAgentTracker,
     /// Last bottom panel the user selected while this pane was focused.
     /// `None` until the active panel changes at least once. Cleaned up
@@ -117,6 +118,15 @@ impl AppState {
             .map(|state| state.codex_agents.as_slice())
     }
 
+    pub fn set_pane_codex_main_model(&mut self, pane_id: &str, model: Option<String>) {
+        self.pane_state_mut(pane_id).codex_main_model = model;
+    }
+
+    pub fn pane_codex_main_model(&self, pane_id: &str) -> Option<&str> {
+        self.pane_state(pane_id)
+            .and_then(|state| state.codex_main_model.as_deref())
+    }
+
     pub fn set_pane_task_progress(&mut self, pane_id: &str, progress: Option<TaskProgress>) {
         self.pane_state_mut(pane_id).task_progress = progress;
     }
@@ -189,6 +199,7 @@ mod tests {
         assert!(state.inactive_since.is_none());
         assert!(state.codex_token_usage.is_none());
         assert!(state.codex_agents.is_empty());
+        assert!(state.codex_main_model.is_none());
         assert!(state.bottom_panel_pref.is_none());
         assert!(state.task_progress_log_mtime.is_none());
     }
@@ -277,14 +288,17 @@ mod tests {
         );
         state.set_pane_task_dismissed_total(pane_id, Some(7));
         state.set_pane_inactive_since(pane_id, Some(42));
+        state.set_pane_codex_main_model(pane_id, Some("gpt-5.6-sol".into()));
         state.set_pane_codex_agents(
             pane_id,
             vec![AgentRecord {
                 internal_id: "agent-full-id".into(),
                 display_name: "/root/task1_review".into(),
-                status: AgentStatus::Done,
+                role: "worker".into(),
+                model: "gpt-5.6-terra".into(),
+                status: AgentStatus::Working,
                 started_at: Some(10),
-                finished_at: Some(25),
+                finished_at: None,
             }],
         );
 
@@ -296,15 +310,18 @@ mod tests {
         );
         assert_eq!(state.pane_task_dismissed_total(pane_id), Some(7));
         assert_eq!(state.pane_inactive_since(pane_id), Some(42));
+        assert_eq!(state.pane_codex_main_model(pane_id), Some("gpt-5.6-sol"));
         assert_eq!(
             state.pane_codex_agents(pane_id),
             Some(
                 &[AgentRecord {
                     internal_id: "agent-full-id".into(),
                     display_name: "/root/task1_review".into(),
-                    status: AgentStatus::Done,
+                    role: "worker".into(),
+                    model: "gpt-5.6-terra".into(),
+                    status: AgentStatus::Working,
                     started_at: Some(10),
-                    finished_at: Some(25),
+                    finished_at: None,
                 }][..]
             ),
         );

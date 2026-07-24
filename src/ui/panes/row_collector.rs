@@ -110,6 +110,7 @@ fn push_pane(
     let codex_agents = pane_state
         .map(|state| state.codex_agents.as_slice())
         .filter(|agents| !agents.is_empty());
+    let codex_main_model = pane_state.and_then(|state| state.codex_main_model.as_deref());
     let status_line_idx = collected.lines.len();
     let pane_lines = row::render_pane_lines_with_runtime(
         pane,
@@ -118,6 +119,7 @@ fn push_pane(
         task_progress,
         token_usage,
         codex_agents,
+        codex_main_model,
         is_selected,
         is_active,
         width,
