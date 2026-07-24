@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
+use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
@@ -8,6 +9,23 @@ use indexmap::IndexMap;
 use serde_json::Value;
 
 use super::CodexAgentStatus;
+
+const CONTENT_ANCHOR_BYTES: usize = 4 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileIdentity {
+    device: u64,
+    inode: u64,
+}
+
+impl FileIdentity {
+    fn from_metadata(metadata: &std::fs::Metadata) -> Self {
+        Self {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
@@ -24,8 +42,10 @@ pub(crate) struct TranscriptTracker {
     parent_session_id: Option<String>,
     offset: u64,
     modified: Option<SystemTime>,
+    file_identity: Option<FileIdentity>,
     initialized: bool,
     partial_line: Vec<u8>,
+    content_anchor: Vec<u8>,
     agents: IndexMap<String, CatalogAgent>,
     pending_close_targets: HashMap<String, String>,
     closed_ids: HashSet<String>,
@@ -58,33 +78,53 @@ impl TranscriptTracker {
             return Ok(());
         }
 
-        let metadata = match std::fs::metadata(&path) {
-            Ok(metadata) => metadata,
+        let mut file = match File::open(&path) {
+            Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 self.reset();
                 return Ok(());
             }
             Err(error) => return Err(error),
         };
+        let metadata = file.metadata()?;
         let len = metadata.len();
         let modified = metadata.modified().ok();
+        let file_identity = FileIdentity::from_metadata(&metadata);
 
-        if self.initialized && self.offset == len && self.modified == modified {
+        if self.initialized
+            && self.offset == len
+            && self.modified == modified
+            && self.file_identity == Some(file_identity)
+        {
             return Ok(());
         }
 
-        let rebuild = !self.initialized
+        let mut rebuild = !self.initialized
+            || self.file_identity != Some(file_identity)
             || len < self.offset
             || (len == self.offset && self.modified != modified);
+        // Atomic replacement changes the file identity. An in-place
+        // truncate-and-rewrite keeps it, so also verify the bytes immediately
+        // before the saved cursor before treating growth as an append.
+        if !rebuild && !self.content_anchor_matches(&mut file)? {
+            rebuild = true;
+        }
         let start = if rebuild { 0 } else { self.offset };
         if rebuild {
             self.reset();
         }
 
-        let mut file = File::open(path)?;
         file.seek(SeekFrom::Start(start))?;
         let mut appended = Vec::new();
         file.read_to_end(&mut appended)?;
+        // A writer may append after the initial metadata read. Commit the
+        // cursor and metadata for what this file handle actually consumed so
+        // those bytes are not read into `partial_line` a second time.
+        let consumed_offset = file.stream_position()?;
+        let final_metadata = file.metadata()?;
+        let final_modified = final_metadata.modified().ok();
+        let final_file_identity = FileIdentity::from_metadata(&final_metadata);
+        self.update_content_anchor(&appended);
 
         let mut buffered = std::mem::take(&mut self.partial_line);
         buffered.extend_from_slice(&appended);
@@ -97,8 +137,9 @@ impl TranscriptTracker {
             self.fold_line(line);
         }
 
-        self.offset = len;
-        self.modified = modified;
+        self.offset = consumed_offset;
+        self.modified = final_modified;
+        self.file_identity = Some(final_file_identity);
         self.initialized = true;
         Ok(())
     }
@@ -114,11 +155,32 @@ impl TranscriptTracker {
     fn reset(&mut self) {
         self.offset = 0;
         self.modified = None;
+        self.file_identity = None;
         self.initialized = false;
         self.partial_line.clear();
+        self.content_anchor.clear();
         self.agents.clear();
         self.pending_close_targets.clear();
         self.closed_ids.clear();
+    }
+
+    fn content_anchor_matches(&self, file: &mut File) -> io::Result<bool> {
+        if self.content_anchor.is_empty() {
+            return Ok(true);
+        }
+        let anchor_len = self.content_anchor.len() as u64;
+        file.seek(SeekFrom::Start(self.offset.saturating_sub(anchor_len)))?;
+        let mut current = vec![0; self.content_anchor.len()];
+        file.read_exact(&mut current)?;
+        Ok(current == self.content_anchor)
+    }
+
+    fn update_content_anchor(&mut self, appended: &[u8]) {
+        self.content_anchor.extend_from_slice(appended);
+        if self.content_anchor.len() > CONTENT_ANCHOR_BYTES {
+            let keep_from = self.content_anchor.len() - CONTENT_ANCHOR_BYTES;
+            self.content_anchor.drain(..keep_from);
+        }
     }
 
     fn fold_line(&mut self, line: &[u8]) {
@@ -610,6 +672,65 @@ mod tests {
                 .map(String::as_str)
                 .collect::<Vec<_>>(),
             vec!["agent-c"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn atomic_replacement_longer_than_previous_offset_rebuilds_catalog() -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("rollout.jsonl");
+        write_lines(&path, &[activity("started", "agent-a", "/root/task-a", 10)])?;
+
+        let mut tracker = tracker_for(&path, "parent-1");
+        tracker.refresh()?;
+
+        let replacement = dir.path().join("replacement.jsonl");
+        write_lines(
+            &replacement,
+            &[activity("started", "agent-b", "/root/task-b", 20)],
+        )?;
+        let mut file = OpenOptions::new().append(true).open(&replacement)?;
+        writeln!(file, "{}", "x".repeat(1024))?;
+        fs::rename(replacement, &path)?;
+        tracker.refresh()?;
+
+        assert_eq!(
+            tracker
+                .agents()
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["agent-b"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn in_place_rewrite_longer_than_previous_offset_rebuilds_catalog() -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("rollout.jsonl");
+        write_lines(&path, &[activity("started", "agent-a", "/root/task-a", 10)])?;
+
+        let mut tracker = tracker_for(&path, "parent-1");
+        tracker.refresh()?;
+
+        let mut file = fs::File::create(&path)?;
+        writeln!(
+            file,
+            "{}",
+            activity("started", "agent-b", "/root/task-b", 20)
+        )?;
+        writeln!(file, "{}", "x".repeat(1024))?;
+        tracker.refresh()?;
+
+        assert_eq!(
+            tracker
+                .agents()
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["agent-b"]
         );
         Ok(())
     }
