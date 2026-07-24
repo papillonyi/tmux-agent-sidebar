@@ -97,6 +97,7 @@ impl EventAdapter for CodexAdapter {
                         agent_type.into()
                     },
                     agent_id: optional_str(input, "agent_id"),
+                    session_id: optional_str(input, "session_id"),
                 })
             }
             "subagent-stop" => {
@@ -108,6 +109,7 @@ impl EventAdapter for CodexAdapter {
                         agent_type.into()
                     },
                     agent_id: optional_str(input, "agent_id"),
+                    session_id: optional_str(input, "session_id"),
                     last_message: json_str(input, "last_assistant_message").into(),
                     transcript_path: json_str(input, "agent_transcript_path").into(),
                 })
@@ -281,6 +283,7 @@ mod tests {
             Some(AgentEvent::SubagentStart {
                 agent_type: "reviewer".into(),
                 agent_id: Some("agent-a81f1234".into()),
+                session_id: Some("session-1".into()),
             })
         );
     }
@@ -294,6 +297,7 @@ mod tests {
             Some(AgentEvent::SubagentStart {
                 agent_type: "subagent".into(),
                 agent_id: Some("agent-a81f1234".into()),
+                session_id: None,
             })
         );
     }
@@ -307,6 +311,7 @@ mod tests {
             Some(AgentEvent::SubagentStart {
                 agent_type: "subagent".into(),
                 agent_id: Some("agent-a81f1234".into()),
+                session_id: None,
             })
         );
     }
@@ -320,6 +325,7 @@ mod tests {
             Some(AgentEvent::SubagentStart {
                 agent_type: "reviewer".into(),
                 agent_id: None,
+                session_id: None,
             })
         );
     }
@@ -400,6 +406,7 @@ mod tests {
             Some(AgentEvent::SubagentStop {
                 agent_type: "reviewer".into(),
                 agent_id: Some("agent-a81f1234".into()),
+                session_id: Some("session-1".into()),
                 last_message: "Review complete".into(),
                 transcript_path: "/tmp/codex-subagent.jsonl".into(),
             })
@@ -415,6 +422,7 @@ mod tests {
             Some(AgentEvent::SubagentStop {
                 agent_type: "subagent".into(),
                 agent_id: Some("agent-a81f1234".into()),
+                session_id: None,
                 last_message: String::new(),
                 transcript_path: String::new(),
             })
@@ -430,6 +438,7 @@ mod tests {
             Some(AgentEvent::SubagentStop {
                 agent_type: "subagent".into(),
                 agent_id: Some("agent-a81f1234".into()),
+                session_id: None,
                 last_message: String::new(),
                 transcript_path: String::new(),
             })
@@ -447,6 +456,7 @@ mod tests {
                 Some(AgentEvent::SubagentStop {
                     agent_type: "reviewer".into(),
                     agent_id: None,
+                    session_id: None,
                     last_message: String::new(),
                     transcript_path: String::new(),
                 })

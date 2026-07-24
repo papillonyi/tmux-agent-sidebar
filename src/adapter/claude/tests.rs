@@ -232,6 +232,7 @@ fn subagent_start() {
         AgentEvent::SubagentStart {
             agent_type: "Explore".into(),
             agent_id: None,
+            session_id: None,
         }
     );
 }
@@ -239,12 +240,17 @@ fn subagent_start() {
 #[test]
 fn subagent_start_captures_agent_id() {
     let adapter = ClaudeAdapter;
-    let input = json!({"agent_type": "Explore", "agent_id": "sub-42"});
+    let input = json!({
+        "agent_type": "Explore",
+        "agent_id": "sub-42",
+        "session_id": "claude-parent"
+    });
     assert_eq!(
         adapter.parse("subagent-start", &input).unwrap(),
         AgentEvent::SubagentStart {
             agent_type: "Explore".into(),
             agent_id: Some("sub-42".into()),
+            session_id: Some("claude-parent".into()),
         }
     );
 }
@@ -264,6 +270,7 @@ fn subagent_stop() {
         AgentEvent::SubagentStop {
             agent_type: "Plan".into(),
             agent_id: None,
+            session_id: None,
             last_message: "".into(),
             transcript_path: "".into(),
         }
@@ -276,6 +283,7 @@ fn subagent_stop_captures_full_payload() {
     let input = json!({
         "agent_type": "Explore",
         "agent_id": "sub-42",
+        "session_id": "claude-parent",
         "last_assistant_message": "Found the bug at main.rs:42",
         "agent_transcript_path": "/tmp/sub-transcript.json"
     });
@@ -284,6 +292,7 @@ fn subagent_stop_captures_full_payload() {
         AgentEvent::SubagentStop {
             agent_type: "Explore".into(),
             agent_id: Some("sub-42".into()),
+            session_id: Some("claude-parent".into()),
             last_message: "Found the bug at main.rs:42".into(),
             transcript_path: "/tmp/sub-transcript.json".into(),
         }

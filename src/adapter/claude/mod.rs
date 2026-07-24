@@ -225,6 +225,7 @@ impl EventAdapter for ClaudeAdapter {
                 Some(AgentEvent::SubagentStart {
                     agent_type: agent_type.into(),
                     agent_id: optional_str(input, "agent_id"),
+                    session_id: optional_str(input, "session_id"),
                 })
             }
             "subagent-stop" => {
@@ -235,6 +236,7 @@ impl EventAdapter for ClaudeAdapter {
                 Some(AgentEvent::SubagentStop {
                     agent_type: agent_type.into(),
                     agent_id: optional_str(input, "agent_id"),
+                    session_id: optional_str(input, "session_id"),
                     last_message: json_str(input, "last_assistant_message").into(),
                     transcript_path: json_str(input, "agent_transcript_path").into(),
                 })

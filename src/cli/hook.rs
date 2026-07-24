@@ -10,6 +10,24 @@ mod notifications;
 use context::{sync_pane_location, sync_transcript_path};
 use notifications::notification_settings;
 
+fn sync_event_transcript_path(
+    pane: &str,
+    kind: crate::event::AgentEventKind,
+    transcript_path: Option<&str>,
+) {
+    if matches!(
+        kind,
+        crate::event::AgentEventKind::SubagentStart | crate::event::AgentEventKind::SubagentStop
+    ) {
+        return;
+    }
+    sync_transcript_path(
+        pane,
+        transcript_path,
+        kind == crate::event::AgentEventKind::SessionStart,
+    );
+}
+
 // ─── hook subcommand ────────────────────────────────────────────────────────
 
 pub(crate) fn cmd_hook(args: &[String]) -> i32 {
@@ -38,11 +56,7 @@ pub(crate) fn cmd_hook(args: &[String]) -> i32 {
     // SessionStart begins a new parent session, so an absent path clears any
     // stale value. Other events only fill or refresh a path when Codex reports
     // one. Token values themselves are read by the TUI refresh loop.
-    sync_transcript_path(
-        &pane,
-        transcript_path.as_deref(),
-        event.kind() == crate::event::AgentEventKind::SessionStart,
-    );
+    sync_event_transcript_path(&pane, event.kind(), transcript_path.as_deref());
 
     handle_event(&pane, agent_name, event)
 }
@@ -139,6 +153,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
         AgentEvent::SubagentStart {
             agent_type,
             agent_id,
+            ..
         } => handlers::on_subagent_start(pane, &agent_type, agent_id.as_deref()),
         AgentEvent::SubagentStop { agent_id, .. } => {
             handlers::on_subagent_stop(pane, agent_id.as_deref())
@@ -193,7 +208,50 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::AgentEventKind;
     use crate::tmux;
+
+    #[test]
+    fn subagent_transcript_path_keeps_parent_value() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%SUBAGENT_TRANSCRIPT";
+        tmux::test_mock::set(pane, tmux::PANE_TRANSCRIPT_PATH, "/tmp/parent.jsonl");
+
+        sync_event_transcript_path(
+            pane,
+            AgentEventKind::SubagentStart,
+            Some("/tmp/child.jsonl"),
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_TRANSCRIPT_PATH).as_deref(),
+            Some("/tmp/parent.jsonl")
+        );
+
+        sync_event_transcript_path(pane, AgentEventKind::SubagentStop, Some("/tmp/child.jsonl"));
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_TRANSCRIPT_PATH).as_deref(),
+            Some("/tmp/parent.jsonl")
+        );
+    }
+
+    #[test]
+    fn session_start_transcript_path_sets_and_clears_parent_value() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%SESSION_TRANSCRIPT";
+
+        sync_event_transcript_path(
+            pane,
+            AgentEventKind::SessionStart,
+            Some("/tmp/parent.jsonl"),
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_TRANSCRIPT_PATH).as_deref(),
+            Some("/tmp/parent.jsonl")
+        );
+
+        sync_event_transcript_path(pane, AgentEventKind::SessionStart, None);
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_TRANSCRIPT_PATH));
+    }
 
     #[test]
     fn task_completed_does_not_write_pane_attention() {
